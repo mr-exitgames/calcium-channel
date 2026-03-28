@@ -1,0 +1,7 @@
+{
+  "_comment": "Calcium Channel MCP server registry. Install to /rw/config/calcium-channel/registry.json",
+  "example": {
+    "command": "npx -y @anthropic-ai/mcp-server-example",
+    "env_file": "/rw/config/calcium-channel/env/example.env"
+  }
+}

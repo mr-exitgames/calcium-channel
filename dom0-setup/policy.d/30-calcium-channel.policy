@@ -1,0 +1,14 @@
+## Calcium Channel — MCP-over-qrexec access control
+## Managed by calciumchannel.McpRegister or manually.
+##
+## Format: calciumchannel.Mcp+<server>  *  <source-vm>  <mcp-vm>  allow|ask|deny
+##
+## Discovery service — any VM can list its own allowed servers
+calciumchannel.McpList  *  @anyvm  @adminvm  allow
+
+## Registration — only the admin VM can register new servers
+## Replace ADMIN_VM with your privileged VM name
+calciumchannel.McpRegister  *  ADMIN_VM  @adminvm  allow
+calciumchannel.McpRegister  *  @anyvm    @adminvm  deny
+
+## Per-server rules are appended below by McpRegister

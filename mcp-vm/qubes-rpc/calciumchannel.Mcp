@@ -1,0 +1,60 @@
+#!/bin/bash
+# Calcium Channel — MCP server dispatcher
+# Called by qrexec with the MCP server name as the service argument.
+# Looks up the server in the registry and execs it, piping stdio.
+set -euo pipefail
+
+SERVER_NAME="${QREXEC_SERVICE_ARGUMENT:-}"
+
+if [[ -z "$SERVER_NAME" ]]; then
+    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"No MCP server name provided"},"id":null}' >&2
+    exit 1
+fi
+
+# Validate server name (alphanumeric, hyphens, underscores only)
+if [[ ! "$SERVER_NAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid server name"},"id":null}' >&2
+    exit 1
+fi
+
+REGISTRY="/rw/config/calcium-channel/registry.json"
+
+if [[ ! -f "$REGISTRY" ]]; then
+    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"No registry found"},"id":null}' >&2
+    exit 1
+fi
+
+# Extract command for this server from registry
+COMMAND=$(python3 -c "
+import json, sys
+with open('$REGISTRY') as f:
+    reg = json.load(f)
+server = reg.get('$SERVER_NAME')
+if not server:
+    print('NOT_FOUND', file=sys.stderr)
+    sys.exit(1)
+print(server['command'])
+" 2>/dev/null)
+
+if [[ -z "$COMMAND" ]]; then
+    echo '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Unknown MCP server: '"$SERVER_NAME"'"},"id":null}' >&2
+    exit 1
+fi
+
+# Load env file if specified
+ENV_FILE=$(python3 -c "
+import json
+with open('$REGISTRY') as f:
+    reg = json.load(f)
+ef = reg.get('$SERVER_NAME', {}).get('env_file', '')
+print(ef)
+" 2>/dev/null)
+
+if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+# Exec the MCP server — its stdin/stdout become the qrexec channel
+exec $COMMAND

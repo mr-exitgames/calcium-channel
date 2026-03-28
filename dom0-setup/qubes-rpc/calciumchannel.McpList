@@ -1,0 +1,47 @@
+#!/bin/bash
+# Calcium Channel — Discovery service
+# Returns the list of MCP servers the calling VM is allowed to access.
+# Parses dom0 qrexec policy to determine permissions.
+set -euo pipefail
+
+CALLER="${QREXEC_REMOTE_DOMAIN:-unknown}"
+POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
+
+if [[ ! -f "$POLICY" ]]; then
+    echo "[]"
+    exit 0
+fi
+
+# Parse policy file for calciumchannel.Mcp+<name> entries that allow the caller
+python3 -c "
+import re, json
+
+caller = '$CALLER'
+results = []
+
+with open('$POLICY') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        # Match: calciumchannel.Mcp+<name>  *  <source>  <target>  allow
+        m = re.match(
+            r'calciumchannel\.Mcp\+(\S+)\s+\*\s+(\S+)\s+(\S+)\s+(allow|ask)',
+            line
+        )
+        if not m:
+            continue
+
+        server_name, source, target, action = m.groups()
+
+        # Check if caller matches the source (exact match or @anyvm)
+        if source == caller or source == '@anyvm':
+            results.append({
+                'name': server_name,
+                'target_vm': target,
+                'action': action
+            })
+
+print(json.dumps(results, indent=2))
+"
