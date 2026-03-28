@@ -1,7 +1,9 @@
 #!/bin/bash
 # Calcium Channel — dom0 installer
-# Run in dom0: qvm-run -p <source-vm> 'cat /home/user/calcium-channel/dom0-install.sh' | bash -s <source-vm> [admin-vm]
-set -euo pipefail
+# Run in dom0 (two steps — piping directly won't work due to stdin conflicts):
+#   qvm-run -p <source-vm> 'cat /home/user/calcium-channel/dom0-install.sh' > /tmp/cc-install.sh
+#   bash /tmp/cc-install.sh <source-vm> [admin-vm]
+set -eu
 
 SOURCE_VM="${1:?Usage: $0 <source-vm> [admin-vm]}"
 ADMIN_VM="${2:-$SOURCE_VM}"
