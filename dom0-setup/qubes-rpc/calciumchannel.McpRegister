@@ -55,7 +55,7 @@ lines = [l for l in lines if not l.startswith(prefix)]
 
 # Add new rules
 for vm in allow_vms:
-    lines.append(f'calciumchannel.Mcp +{server}  {vm}  {mcp_vm}  allow\n')
+    lines.append(f'calciumchannel.Mcp +{server}  {vm}  {mcp_vm}  allow autostart=yes\n')
 
 # Default deny
 lines.append(f'calciumchannel.Mcp +{server}  @anyvm  @anyvm  deny\n')
