@@ -42,4 +42,4 @@ echo "[+] Calcium Channel dom0 components installed."
 echo "[+] Next: run mcp-vm-install.sh in each VM that will host MCP servers."
 echo ""
 echo "To register an MCP server (from $ADMIN_VM):"
-echo '  echo '\''{"server":"github","mcp_vm":"mcp-vm","allow":["work-vm"]}'\'' | qrexec-client-vm dom0 calciumchannel.McpRegister'
+echo '  echo '\''{"server":"files","mcp_vm":"mcp-vm","allow":["work-vm"]}'\'' | qrexec-client-vm dom0 calciumchannel.McpRegister'

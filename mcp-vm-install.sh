@@ -98,9 +98,11 @@ echo "To add an MCP server to this VM's registry:"
 echo '  python3 -c "'
 echo '    import json'
 echo '    reg = json.load(open(\"/rw/config/calcium-channel/registry.json\"))'
-echo '    reg[\"github\"] = {\"command\": \"npx -y @modelcontextprotocol/server-github\", \"env_file\": \"/rw/config/calcium-channel/env/github.env\"}'
+echo '    reg[\"files\"] = {\"command\": \"npx -y @modelcontextprotocol/server-filesystem /home/user\"}'
 echo '    json.dump(reg, open(\"/rw/config/calcium-channel/registry.json\", \"w\"), indent=2)'
 echo '  "'
 echo ""
-echo "Then create the env file with any required tokens:"
-echo '  chmod 600 /rw/config/calcium-channel/env/github.env'
+echo "For servers that need credentials, add an env_file key and create the file:"
+echo '  reg["myserver"] = {"command": "...", "env_file": "/rw/config/calcium-channel/env/myserver.env"}'
+echo '  echo "API_KEY=..." > /rw/config/calcium-channel/env/myserver.env'
+echo '  chmod 600 /rw/config/calcium-channel/env/myserver.env'

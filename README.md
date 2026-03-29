@@ -14,17 +14,17 @@ work-vm                     dom0                        mcp-vm
 Claude Code                 policy check                MCP server
   │                           │                           │
   │ .mcp.json:                │                           │
-  │  "github": {              │                           │
+  │  "files": {               │                           │
   │    "command":              │                           │
   │    "qrexec-client-vm",    │                           │
   │    "args": ["mcp-vm",     │                           │
   │     "calciumchannel.      │                           │
-  │      Mcp+github"]         │                           │
+  │      Mcp+files"]          │                           │
   │  }                        │                           │
   │                           │                           │
   ├──stdio──► qrexec ──────► policy: work-vm→mcp-vm? ──► calciumchannel.Mcp
   │                           ALLOW                       │
-  │                                                       ├─ lookup "github"
+  │                                                       ├─ lookup "files"
   │                                                       │  in registry.json
   │                                                       │
   │◄──────────────── stdio piped ────────────────────────►│ exec mcp server
@@ -43,18 +43,19 @@ The client VM's `.mcp.json` points `qrexec-client-vm` at the MCP server VM. dom0
 
 ### dom0
 
-- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access (parsed from policy).
+- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access (parsed from policy). Each VM only sees its own authorized servers.
 - **`calciumchannel.McpRegister`** — Registration service. Accepts JSON to add policy rules for a new MCP server. Only callable by the admin VM.
 - **Policy file** (`30-calcium-channel.policy`) — Per-server ACL rules.
 
 ### MCP server VM
 
-- **`calciumchannel.Mcp`** — Dispatcher qrexec service. Reads `QREXEC_SERVICE_ARGUMENT` (e.g., `github`), looks it up in the registry, and execs the MCP server.
+- **`calciumchannel.Mcp`** — Dispatcher qrexec service. Reads `QREXEC_SERVICE_ARGUMENT` (e.g., `files`), looks it up in the registry, and execs the MCP server.
 - **`/rw/config/calcium-channel/registry.json`** — Maps server names to commands and optional env files.
 
 ### Client VM
 
-- **`client-gen.sh`** — Queries `McpList` and auto-generates `~/.mcp.json` with the correct `qrexec-client-vm` entries.
+- **`client-gen.sh`** — Installs the management MCP server, queries `McpList`, and auto-generates `~/.mcp.json` with the correct `qrexec-client-vm` entries.
+- **`calcium-channel-mgmt.py`** — Management MCP server. Exposes `list_servers`, `register_server`, and `refresh_mcps` as MCP tools so agentic workflows can discover and manage servers without dropping to a shell. Installed to `/rw/config/calcium-channel/calcium-channel-mgmt.py` by `client-gen.sh`.
 
 ## Installation
 
@@ -81,14 +82,23 @@ Add servers to the registry:
 python3 -c "
 import json
 reg = json.load(open('/rw/config/calcium-channel/registry.json'))
-reg['github'] = {
-    'command': 'npx -y @modelcontextprotocol/server-github',
-    'env_file': '/rw/config/calcium-channel/env/github.env'
+reg['files'] = {
+    'command': 'npx -y @modelcontextprotocol/server-filesystem /home/user'
 }
 json.dump(reg, open('/rw/config/calcium-channel/registry.json', 'w'), indent=2)
 "
+```
 
-chmod 600 /rw/config/calcium-channel/env/github.env
+For servers that need credentials, add an env file:
+
+```bash
+reg['myserver'] = {
+    'command': 'npx -y @example/mcp-server',
+    'env_file': '/rw/config/calcium-channel/env/myserver.env'
+}
+# then:
+echo "API_KEY=..." > /rw/config/calcium-channel/env/myserver.env
+chmod 600 /rw/config/calcium-channel/env/myserver.env
 ```
 
 ### 3. Register and set ACLs
@@ -96,9 +106,13 @@ chmod 600 /rw/config/calcium-channel/env/github.env
 From the admin VM:
 
 ```bash
-echo '{"server":"github","mcp_vm":"mcp-vm","allow":["work-vm","dev-vm"]}' \
+echo '{"server":"files","mcp_vm":"mcp-vm","allow":["work-vm","dev-vm"]}' \
   | qrexec-client-vm dom0 calciumchannel.McpRegister
 ```
+
+Or via the management MCP server (if Claude Code is running in the admin VM):
+
+Use the `register_server` tool with `server="files"`, `mcp_vm="mcp-vm"`, `allow=["work-vm","dev-vm"]`.
 
 ### 4. Configure client VMs
 
@@ -113,15 +127,33 @@ Or manually add to `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "github": {
+    "files": {
       "command": "qrexec-client-vm",
-      "args": ["mcp-vm", "calciumchannel.Mcp+github"]
+      "args": ["mcp-vm", "calciumchannel.Mcp+files"]
+    },
+    "calcium-channel": {
+      "command": "python3",
+      "args": ["/rw/config/calcium-channel/calcium-channel-mgmt.py"]
     }
   }
 }
 ```
 
 Restart Claude Code to connect.
+
+## Management MCP server
+
+`client-gen.sh` installs a local MCP server (`calcium-channel-mgmt.py`) that exposes Calcium Channel management as tools, enabling agentic workflows without dropping to a shell.
+
+| Tool | Description | Authorization |
+|------|-------------|---------------|
+| `list_servers` | List MCP servers this VM can access | Any VM |
+| `register_server` | Register a server and set ACLs | Admin VM only (dom0 enforces) |
+| `refresh_mcps` | Re-sync `~/.mcp.json` and prune stale entries | Any VM |
+
+Because dom0 policy enforces `McpRegister` access, `register_server` simply fails for non-admin VMs — no special logic needed in the script. The same server can be deployed identically on both client VMs (read-only use) and the admin VM (full management).
+
+`refresh_mcps` is useful after an admin grants or revokes access: call the tool, then restart Claude Code to pick up the updated config.
 
 ## File structure
 
@@ -139,7 +171,8 @@ calcium-channel/
 │   ├── qubes-rpc/
 │   │   └── calciumchannel.Mcp            # MCP server dispatcher
 │   └── registry.json                      # Example registry
-└── client-gen.sh                          # Client .mcp.json generator
+├── calcium-channel-mgmt.py               # Management MCP server (source)
+└── client-gen.sh                          # Client setup: installs mgmt server + syncs .mcp.json
 ```
 
 ## Related projects
