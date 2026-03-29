@@ -57,7 +57,7 @@ fi
 exec $COMMAND
 DISPATCHER
 
-sudo chmod +x /etc/qubes-rpc/calciumchannel.Mcp
+sudo chmod 755 /etc/qubes-rpc/calciumchannel.Mcp
 echo "  + /etc/qubes-rpc/calciumchannel.Mcp"
 
 # Create registry directory
