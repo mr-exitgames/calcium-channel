@@ -25,9 +25,9 @@ with open('$POLICY') as f:
         if not line or line.startswith('#'):
             continue
 
-        # Match: calciumchannel.Mcp+<name>  *  <source>  <target>  allow
+        # Match: calciumchannel.Mcp +<name>  <source>  <target>  allow
         m = re.match(
-            r'calciumchannel\.Mcp\+(\S+)\s+\*\s+(\S+)\s+(\S+)\s+(allow|ask)',
+            r'calciumchannel\.Mcp\s+\+(\S+)\s+(\S+)\s+(\S+)\s+(allow|ask)',
             line
         )
         if not m:

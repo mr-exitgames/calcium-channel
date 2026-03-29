@@ -12,6 +12,15 @@ echo "[*] Calcium Channel — dom0 installer"
 echo "[*] Source VM: $SOURCE_VM"
 echo "[*] Admin VM: $ADMIN_VM"
 
+# Verify the VM exists
+if ! qvm-check "$SOURCE_VM" &>/dev/null; then
+    echo "ERROR: VM '$SOURCE_VM' does not exist" >&2
+    exit 1
+fi
+
+# Ensure directories exist
+mkdir -p /etc/qubes-rpc /etc/qubes/policy.d
+
 # Install dom0 qrexec services
 echo "[*] Installing qrexec services in dom0..."
 for svc in McpList McpRegister; do

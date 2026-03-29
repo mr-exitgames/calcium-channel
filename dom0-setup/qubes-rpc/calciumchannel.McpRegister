@@ -2,39 +2,74 @@
 # Calcium Channel — Registration service (dom0 only)
 # Accepts JSON: {"server": "name", "mcp_vm": "vm", "allow": ["vm1","vm2"]}
 # Appends policy rules to 30-calcium-channel.policy
-set -euo pipefail
 
-read -r payload
+POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
 
-server=$(echo "$payload" | python3 -c "import sys,json; print(json.load(sys.stdin)['server'])" 2>/dev/null)
-mcp_vm=$(echo "$payload" | python3 -c "import sys,json; print(json.load(sys.stdin)['mcp_vm'])" 2>/dev/null)
-allow_vms=$(echo "$payload" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin).get('allow', [])))" 2>/dev/null)
+# Read first line from stdin (single-line JSON payload)
+read -t 5 -r payload || true
 
-if [[ -z "$server" || -z "$mcp_vm" ]]; then
-    echo "ERROR: payload must include 'server' and 'mcp_vm'" >&2
+if [[ -z "$payload" ]]; then
+    echo "ERROR: empty payload"
     exit 1
 fi
 
-# Validate names
-for name in $server $mcp_vm $allow_vms; do
-    if [[ ! "$name" =~ ^[a-zA-Z@][a-zA-Z0-9_-]*$ ]]; then
-        echo "ERROR: Invalid name: '$name'" >&2
-        exit 1
-    fi
-done
+# Parse JSON and generate new policy to a temp file
+TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
 
-POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
-touch "$POLICY"
+python3 -c "
+import json, sys, re, os
 
-# Remove existing rules for this server (to allow re-registration)
-sed -i "/^calciumchannel\.Mcp+${server} /d" "$POLICY"
+payload = '''$payload'''
+try:
+    data = json.loads(payload)
+except json.JSONDecodeError as e:
+    print(f'ERROR: invalid JSON: {e}')
+    sys.exit(1)
+
+server = data.get('server', '')
+mcp_vm = data.get('mcp_vm', '')
+allow_vms = data.get('allow', [])
+
+if not server or not mcp_vm:
+    print('ERROR: payload must include server and mcp_vm')
+    sys.exit(1)
+
+name_re = re.compile(r'^[a-zA-Z@][a-zA-Z0-9_-]*$')
+for name in [server, mcp_vm] + allow_vms:
+    if not name_re.match(name):
+        print(f'ERROR: Invalid name: {name}')
+        sys.exit(1)
+
+policy_path = '$POLICY'
+tmp_path = '$TMPFILE'
+
+# Read existing policy
+lines = []
+if os.path.exists(policy_path):
+    with open(policy_path) as f:
+        lines = f.readlines()
+
+# Remove existing rules for this server
+prefix = f'calciumchannel.Mcp +{server} '
+lines = [l for l in lines if not l.startswith(prefix)]
 
 # Add new rules
-for vm in $allow_vms; do
-    echo "calciumchannel.Mcp+${server}  *  ${vm}  ${mcp_vm}  allow" >> "$POLICY"
-done
+for vm in allow_vms:
+    lines.append(f'calciumchannel.Mcp +{server}  {vm}  {mcp_vm}  allow\n')
 
-# Default deny for this server
-echo "calciumchannel.Mcp+${server}  *  @anyvm  @anyvm  deny" >> "$POLICY"
+# Default deny
+lines.append(f'calciumchannel.Mcp +{server}  @anyvm  @anyvm  deny\n')
 
-echo "OK: Registered MCP server '${server}' in ${mcp_vm}, allowed: ${allow_vms:-none}"
+with open(tmp_path, 'w') as f:
+    f.writelines(lines)
+
+print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}')
+"
+
+if [[ $? -eq 0 ]]; then
+    sudo tee "$POLICY" < "$TMPFILE" > /dev/null
+    rm -f "$TMPFILE"
+else
+    rm -f "$TMPFILE"
+    exit 1
+fi
