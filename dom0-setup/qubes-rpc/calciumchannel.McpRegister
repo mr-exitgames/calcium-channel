@@ -29,6 +29,7 @@ except json.JSONDecodeError as e:
 server = data.get('server', '')
 mcp_vm = data.get('mcp_vm', '')
 allow_vms = data.get('allow', [])
+alias = data.get('alias')
 
 if not server or not mcp_vm:
     print('ERROR: payload must include server and mcp_vm')
@@ -40,8 +41,13 @@ for name in [server, mcp_vm] + allow_vms:
         print(f'ERROR: Invalid name: {name}')
         sys.exit(1)
 
+if alias is not None and alias and not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', alias):
+    print(f'ERROR: Invalid alias: {alias}')
+    sys.exit(1)
+
 policy_path = '$POLICY'
 tmp_path = '$TMPFILE'
+meta_path = '/etc/qubes/policy.d/30-calcium-channel-meta.json'
 
 # Read existing policy
 lines = []
@@ -63,7 +69,22 @@ lines.append(f'calciumchannel.Mcp +{server}  @anyvm  @anyvm  deny\n')
 with open(tmp_path, 'w') as f:
     f.writelines(lines)
 
-print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}')
+# Update alias in metadata if provided
+if alias is not None:
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            meta = json.load(open(meta_path))
+        except Exception:
+            pass
+    if alias:
+        meta.setdefault(server, {})['alias'] = alias
+    else:
+        meta.get(server, {}).pop('alias', None)
+    json.dump(meta, open(meta_path, 'w'), indent=2)
+
+alias_note = f', alias={alias!r}' if alias else ''
+print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}{alias_note}')
 "
 
 if [[ $? -eq 0 ]]; then

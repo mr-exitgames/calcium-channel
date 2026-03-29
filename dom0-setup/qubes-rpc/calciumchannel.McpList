@@ -6,18 +6,27 @@ set -euo pipefail
 
 CALLER="${QREXEC_REMOTE_DOMAIN:-unknown}"
 POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
+META="/etc/qubes/policy.d/30-calcium-channel-meta.json"
 
 if [[ ! -f "$POLICY" ]]; then
     echo "[]"
     exit 0
 fi
 
-# Parse policy file for calciumchannel.Mcp+<name> entries that allow the caller
+# Parse policy file for calciumchannel.Mcp+<name> entries that allow the caller.
+# Include alias from metadata if set.
 python3 -c "
-import re, json
+import re, json, os
 
 caller = '$CALLER'
 results = []
+
+meta = {}
+if os.path.exists('$META'):
+    try:
+        meta = json.load(open('$META'))
+    except Exception:
+        pass
 
 with open('$POLICY') as f:
     for line in f:
@@ -37,11 +46,11 @@ with open('$POLICY') as f:
 
         # Check if caller matches the source (exact match or @anyvm)
         if source == caller or source == '@anyvm':
-            results.append({
-                'name': server_name,
-                'target_vm': target,
-                'action': action
-            })
+            entry = {'name': server_name, 'target_vm': target, 'action': action}
+            alias = meta.get(server_name, {}).get('alias')
+            if alias:
+                entry['alias'] = alias
+            results.append(entry)
 
 print(json.dumps(results, indent=2))
 "

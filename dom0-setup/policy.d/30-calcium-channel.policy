@@ -7,5 +7,7 @@
 calciumchannel.McpList      *  @anyvm       @adminvm  allow
 calciumchannel.McpRegister  *  ADMIN_VM     @adminvm  allow
 calciumchannel.McpRegister  *  @anyvm       @adminvm  deny
+calciumchannel.McpRename    *  ADMIN_VM     @adminvm  allow
+calciumchannel.McpRename    *  @anyvm       @adminvm  deny
 
 ## Per-server rules are appended below by McpRegister

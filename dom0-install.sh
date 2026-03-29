@@ -23,7 +23,7 @@ mkdir -p /etc/qubes-rpc /etc/qubes/policy.d
 
 # Install dom0 qrexec services
 echo "[*] Installing qrexec services in dom0..."
-for svc in McpList McpRegister; do
+for svc in McpList McpRegister McpRename; do
     qvm-run -p "$SOURCE_VM" "cat /home/user/calcium-channel/dom0-setup/qubes-rpc/calciumchannel.$svc" \
         > "/etc/qubes-rpc/calciumchannel.$svc"
     chmod +x "/etc/qubes-rpc/calciumchannel.$svc"

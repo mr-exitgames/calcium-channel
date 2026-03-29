@@ -43,9 +43,11 @@ The client VM's `.mcp.json` points `qrexec-client-vm` at the MCP server VM. dom0
 
 ### dom0
 
-- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access (parsed from policy). Each VM only sees its own authorized servers.
-- **`calciumchannel.McpRegister`** — Registration service. Accepts JSON to add policy rules for a new MCP server. Only callable by the admin VM.
+- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access (parsed from policy). Each VM only sees its own authorized servers. Includes `alias` field if set.
+- **`calciumchannel.McpRegister`** — Registration service. Accepts JSON to add policy rules for a new MCP server. Accepts optional `alias` field. Only callable by the admin VM.
+- **`calciumchannel.McpRename`** — Alias update service. Sets or clears the display alias for a server without touching ACL rules. Only callable by the admin VM.
 - **Policy file** (`30-calcium-channel.policy`) — Per-server ACL rules.
+- **Metadata file** (`30-calcium-channel-meta.json`) — Per-server aliases and other metadata, stored alongside the policy.
 
 ### MCP server VM
 
@@ -114,6 +116,15 @@ Or via the management MCP server (if Claude Code is running in the admin VM):
 
 Use the `register_server` tool with `server="files"`, `mcp_vm="mcp-vm"`, `allow=["work-vm","dev-vm"]`.
 
+To set a display alias after registration (changes the tool namespace prefix in Claude Code):
+
+```bash
+echo '{"server":"signal","alias":"metatron"}' \
+  | qrexec-client-vm dom0 calciumchannel.McpRename
+```
+
+Or via the management MCP server: use the `rename_server` tool with `server="signal"`, `alias="metatron"`. Then call `refresh_mcps` to apply.
+
 ### 4. Configure client VMs
 
 Run in each client VM:
@@ -148,7 +159,8 @@ Restart Claude Code to connect.
 | Tool | Description | Authorization |
 |------|-------------|---------------|
 | `list_servers` | List MCP servers this VM can access | Any VM |
-| `register_server` | Register a server and set ACLs | Admin VM only (dom0 enforces) |
+| `register_server` | Register a server and set ACLs. Accepts optional `alias`. | Admin VM only (dom0 enforces) |
+| `rename_server` | Set or clear the display alias for a server | Admin VM only (dom0 enforces) |
 | `refresh_mcps` | Re-sync `~/.mcp.json` and prune stale entries | Any VM |
 
 Because dom0 policy enforces `McpRegister` access, `register_server` simply fails for non-admin VMs — no special logic needed in the script. The same server can be deployed identically on both client VMs (read-only use) and the admin VM (full management).
@@ -164,8 +176,9 @@ calcium-channel/
 │   ├── policy.d/
 │   │   └── 30-calcium-channel.policy      # ACL policy template
 │   └── qubes-rpc/
-│       ├── calciumchannel.McpList         # Discovery service
-│       └── calciumchannel.McpRegister     # Registration service
+│       ├── calciumchannel.McpList         # Discovery service (returns alias if set)
+│       ├── calciumchannel.McpRegister     # Registration service (accepts optional alias)
+│       └── calciumchannel.McpRename       # Alias update service (admin only)
 ├── mcp-vm-install.sh                      # MCP VM installer
 ├── mcp-vm/
 │   ├── qubes-rpc/

@@ -97,19 +97,19 @@ cat > /rw/config/calcium-channel/calcium-channel-mgmt.py << 'MGMT_EOF'
 #!/usr/bin/env python3
 """
 Calcium Channel — Management MCP server
-Exposes list_servers, register_server, and refresh_mcps as MCP tools.
+Exposes list_servers, register_server, rename_server, and refresh_mcps as MCP tools.
 Installed by client-gen.sh to /rw/config/calcium-channel/calcium-channel-mgmt.py
 
 Works in any VM:
   - list_servers / refresh_mcps — available everywhere (filtered by dom0 policy)
-  - register_server             — only works from the admin VM (dom0 enforces this)
+  - register_server / rename_server — only work from the admin VM (dom0 enforces this)
 """
 import json
 import os
 import subprocess
 import sys
 
-VERSION = "1.0"
+VERSION = "1.1"
 MCP_JSON_DEFAULT = os.path.expanduser("~/.mcp.json")
 SELF_PATH = "/rw/config/calcium-channel/calcium-channel-mgmt.py"
 
@@ -141,8 +141,37 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": "VMs to grant access",
                 },
+                "alias": {
+                    "type": "string",
+                    "description": "Optional display alias used as the tool namespace prefix in Claude Code",
+                },
             },
             "required": ["server", "mcp_vm", "allow"],
+        },
+    },
+    {
+        "name": "rename_server",
+        "description": (
+            "Set or update the display alias for a registered MCP server. "
+            "The alias becomes the key in .mcp.json and the tool namespace prefix "
+            "(e.g., alias 'metatron' -> mcp__metatron__*). "
+            "Pass an empty string to clear the alias and revert to the server name. "
+            "Requires admin VM -- dom0 policy blocks this call from other VMs. "
+            "Agents should call refresh_mcps after renaming to apply the change."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "server": {
+                    "type": "string",
+                    "description": "Canonical server name (as registered)",
+                },
+                "alias": {
+                    "type": "string",
+                    "description": "New display alias, or empty string to clear",
+                },
+            },
+            "required": ["server", "alias"],
         },
     },
     {
@@ -193,9 +222,17 @@ def tool_list_servers():
     return json.dumps(servers, indent=2)
 
 
-def tool_register_server(server, mcp_vm, allow):
-    payload = json.dumps({"server": server, "mcp_vm": mcp_vm, "allow": allow})
-    rc, out, err = _qrexec("calciumchannel.McpRegister", stdin_data=payload)
+def tool_register_server(server, mcp_vm, allow, alias=None):
+    payload = {"server": server, "mcp_vm": mcp_vm, "allow": allow}
+    if alias is not None:
+        payload["alias"] = alias
+    rc, out, err = _qrexec("calciumchannel.McpRegister", stdin_data=json.dumps(payload))
+    return out.strip() or err.strip() or ("OK" if rc == 0 else f"Failed (exit {rc})")
+
+
+def tool_rename_server(server, alias):
+    payload = json.dumps({"server": server, "alias": alias})
+    rc, out, err = _qrexec("calciumchannel.McpRename", stdin_data=payload)
     return out.strip() or err.strip() or ("OK" if rc == 0 else f"Failed (exit {rc})")
 
 
@@ -210,7 +247,8 @@ def tool_refresh_mcps(output=None):
     except json.JSONDecodeError:
         return f"Unexpected McpList response: {out}"
 
-    allowed = {srv["name"]: srv["target_vm"] for srv in servers}
+    # Build set of canonical names for pruning
+    allowed = {srv["name"] for srv in servers}
 
     existing = {}
     if os.path.exists(output):
@@ -222,9 +260,11 @@ def tool_refresh_mcps(output=None):
 
     mcp_servers = existing.get("mcpServers", {})
 
-    # Prune stale calcium-channel qrexec entries (not the management server itself)
+    # Prune stale calcium-channel qrexec entries (not the management server itself).
+    # Match on the service name in args[1], not the .mcp.json key, so aliases don't
+    # prevent pruning of revoked servers.
     pruned = []
-    for name, cfg in list(mcp_servers.items()):
+    for key, cfg in list(mcp_servers.items()):
         args = cfg.get("args", [])
         is_cc_qrexec = (
             cfg.get("command") == "qrexec-client-vm"
@@ -232,18 +272,24 @@ def tool_refresh_mcps(output=None):
             and isinstance(args[1], str)
             and args[1].startswith("calciumchannel.Mcp+")
         )
-        if is_cc_qrexec and name not in allowed:
-            del mcp_servers[name]
-            pruned.append(name)
+        if is_cc_qrexec:
+            service_name = args[1][len("calciumchannel.Mcp+"):]
+            if service_name not in allowed:
+                del mcp_servers[key]
+                pruned.append(key)
 
-    # Add / update authorized entries
+    # Add / update authorized entries, using alias as key if set
     added = []
-    for name, target in allowed.items():
-        mcp_servers[name] = {
+    for srv in servers:
+        name = srv["name"]
+        target = srv["target_vm"]
+        key = srv.get("alias") or name
+        mcp_servers[key] = {
             "command": "qrexec-client-vm",
             "args": [target, f"calciumchannel.Mcp+{name}"],
         }
-        added.append(f"{name} -> {target}")
+        label = f"{key} ({name}) -> {target}" if key != name else f"{name} -> {target}"
+        added.append(label)
 
     # Always keep the management server entry
     mcp_servers["calcium-channel"] = {
@@ -303,8 +349,11 @@ def handle(req):
                 return text(tool_list_servers())
             elif name == "register_server":
                 return text(tool_register_server(
-                    args["server"], args["mcp_vm"], args.get("allow", [])
+                    args["server"], args["mcp_vm"], args.get("allow", []),
+                    alias=args.get("alias"),
                 ))
+            elif name == "rename_server":
+                return text(tool_rename_server(args["server"], args["alias"]))
             elif name == "refresh_mcps":
                 return text(tool_refresh_mcps(args.get("output")))
             else:

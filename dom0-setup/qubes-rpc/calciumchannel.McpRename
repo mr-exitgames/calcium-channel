@@ -1,0 +1,63 @@
+#!/bin/bash
+# Calcium Channel — Rename service (dom0 only)
+# Accepts JSON: {"server": "name", "alias": "display-alias"}
+# Pass empty string for alias to clear it.
+
+META="/etc/qubes/policy.d/30-calcium-channel-meta.json"
+
+# Read first line from stdin (single-line JSON payload)
+read -t 5 -r payload || true
+
+if [[ -z "$payload" ]]; then
+    echo "ERROR: empty payload"
+    exit 1
+fi
+
+python3 -c "
+import json, sys, re, os
+
+payload = '''$payload'''
+try:
+    data = json.loads(payload)
+except json.JSONDecodeError as e:
+    print(f'ERROR: invalid JSON: {e}')
+    sys.exit(1)
+
+server = data.get('server', '')
+alias = data.get('alias', None)
+
+if not server:
+    print('ERROR: payload must include server')
+    sys.exit(1)
+
+if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*\$', server):
+    print(f'ERROR: Invalid server name: {server}')
+    sys.exit(1)
+
+if alias is None:
+    print('ERROR: payload must include alias (pass empty string to clear)')
+    sys.exit(1)
+
+if alias and not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*\$', alias):
+    print(f'ERROR: Invalid alias: {alias}')
+    sys.exit(1)
+
+meta_path = '$META'
+meta = {}
+if os.path.exists(meta_path):
+    try:
+        meta = json.load(open(meta_path))
+    except Exception:
+        pass
+
+if alias:
+    meta.setdefault(server, {})['alias'] = alias
+    json.dump(meta, open(meta_path, 'w'), indent=2)
+    print(f'OK: alias for \"{server}\" set to \"{alias}\"')
+else:
+    meta.get(server, {}).pop('alias', None)
+    if not meta.get(server):
+        meta.pop(server, None)
+    json.dump(meta, open(meta_path, 'w'), indent=2)
+    print(f'OK: alias for \"{server}\" cleared')
+"
