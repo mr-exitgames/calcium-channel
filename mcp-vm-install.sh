@@ -6,9 +6,12 @@ set -euo pipefail
 
 echo "[*] Calcium Channel — MCP VM setup"
 
-# Install dispatcher
+# Create persistent directories
+mkdir -p /rw/config/calcium-channel/env
+
+# Install dispatcher to persistent storage
 echo "[*] Installing MCP dispatcher..."
-sudo tee /etc/qubes-rpc/calciumchannel.Mcp > /dev/null << 'DISPATCHER'
+cat > /rw/config/calcium-channel/calciumchannel.Mcp << 'DISPATCHER'
 #!/bin/bash
 set -euo pipefail
 
@@ -57,11 +60,28 @@ fi
 exec $COMMAND
 DISPATCHER
 
+chmod 755 /rw/config/calcium-channel/calciumchannel.Mcp
+echo "  + /rw/config/calcium-channel/calciumchannel.Mcp"
+
+# Copy to qrexec directory (non-persistent, needed for current session)
+sudo cp /rw/config/calcium-channel/calciumchannel.Mcp /etc/qubes-rpc/calciumchannel.Mcp
 sudo chmod 755 /etc/qubes-rpc/calciumchannel.Mcp
 echo "  + /etc/qubes-rpc/calciumchannel.Mcp"
 
-# Create registry directory
-mkdir -p /rw/config/calcium-channel/env
+# Add to rc.local for persistence across reboots
+RCLOCAL="/rw/config/rc.local"
+if ! grep -q "calcium-channel" "$RCLOCAL" 2>/dev/null; then
+    sudo tee -a "$RCLOCAL" > /dev/null << 'RCLOCAL_ENTRY'
+
+# Calcium Channel — install qrexec dispatcher on boot
+cp /rw/config/calcium-channel/calciumchannel.Mcp /etc/qubes-rpc/calciumchannel.Mcp
+chmod 755 /etc/qubes-rpc/calciumchannel.Mcp
+RCLOCAL_ENTRY
+    sudo chmod +x "$RCLOCAL"
+    echo "  + $RCLOCAL (boot persistence)"
+else
+    echo "  ~ $RCLOCAL (already configured)"
+fi
 
 # Create empty registry if none exists
 if [[ ! -f /rw/config/calcium-channel/registry.json ]]; then
@@ -72,7 +92,7 @@ else
 fi
 
 echo ""
-echo "[+] MCP VM ready."
+echo "[+] MCP VM ready. Dispatcher will persist across reboots."
 echo ""
 echo "To add an MCP server to this VM's registry:"
 echo '  python3 -c "'
