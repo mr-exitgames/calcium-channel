@@ -13,13 +13,14 @@ if [[ -z "$payload" ]]; then
     exit 1
 fi
 
-# Parse JSON and generate new policy to a temp file
+# Parse JSON and generate new policy to a temp file.
+# SECURITY: payload is passed via stdin to Python, never interpolated into code.
 TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
 
-python3 -c "
+printf '%s' "$payload" | python3 -c "
 import json, sys, re, os
 
-payload = '''$payload'''
+payload = sys.stdin.readline()
 try:
     data = json.loads(payload)
 except json.JSONDecodeError as e:
@@ -35,18 +36,27 @@ if not server or not mcp_vm:
     print('ERROR: payload must include server and mcp_vm')
     sys.exit(1)
 
-name_re = re.compile(r'^[a-zA-Z@][a-zA-Z0-9_-]*$')
-for name in [server, mcp_vm] + allow_vms:
+# Server and mcp_vm names: no @ prefix allowed
+name_re = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
+# VM allow-list entries: permit @-tokens like @anyvm
+vm_re = re.compile(r'^[a-zA-Z@][a-zA-Z0-9_-]*$')
+
+for name in [server, mcp_vm]:
     if not name_re.match(name):
         print(f'ERROR: Invalid name: {name}')
         sys.exit(1)
 
-if alias is not None and alias and not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', alias):
+for vm in allow_vms:
+    if not vm_re.match(vm):
+        print(f'ERROR: Invalid VM name: {vm}')
+        sys.exit(1)
+
+if alias is not None and alias and not name_re.match(alias):
     print(f'ERROR: Invalid alias: {alias}')
     sys.exit(1)
 
-policy_path = '$POLICY'
-tmp_path = '$TMPFILE'
+policy_path = os.environ['CC_POLICY']
+tmp_path = os.environ['CC_TMPFILE']
 meta_path = '/etc/qubes/policy.d/30-calcium-channel-meta.json'
 
 # Read existing policy
@@ -74,18 +84,20 @@ if alias is not None:
     meta = {}
     if os.path.exists(meta_path):
         try:
-            meta = json.load(open(meta_path))
+            with open(meta_path) as mf:
+                meta = json.load(mf)
         except Exception:
             pass
     if alias:
         meta.setdefault(server, {})['alias'] = alias
     else:
         meta.get(server, {}).pop('alias', None)
-    json.dump(meta, open(meta_path, 'w'), indent=2)
+    with open(meta_path, 'w') as mf:
+        json.dump(meta, mf, indent=2)
 
 alias_note = f', alias={alias!r}' if alias else ''
 print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}{alias_note}')
-"
+" CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE"
 
 if [[ $? -eq 0 ]]; then
     sudo tee "$POLICY" < "$TMPFILE" > /dev/null

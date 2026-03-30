@@ -13,10 +13,11 @@ if [[ -z "$payload" ]]; then
     exit 1
 fi
 
-python3 -c "
+# SECURITY: payload is passed via stdin to Python, never interpolated into code.
+printf '%s' "$payload" | python3 -c "
 import json, sys, re, os
 
-payload = '''$payload'''
+payload = sys.stdin.readline()
 try:
     data = json.loads(payload)
 except json.JSONDecodeError as e:
@@ -26,11 +27,13 @@ except json.JSONDecodeError as e:
 server = data.get('server', '')
 alias = data.get('alias', None)
 
+name_re = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
+
 if not server:
     print('ERROR: payload must include server')
     sys.exit(1)
 
-if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*\$', server):
+if not name_re.match(server):
     print(f'ERROR: Invalid server name: {server}')
     sys.exit(1)
 
@@ -38,26 +41,29 @@ if alias is None:
     print('ERROR: payload must include alias (pass empty string to clear)')
     sys.exit(1)
 
-if alias and not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*\$', alias):
+if alias and not name_re.match(alias):
     print(f'ERROR: Invalid alias: {alias}')
     sys.exit(1)
 
-meta_path = '$META'
+meta_path = os.environ['CC_META']
 meta = {}
 if os.path.exists(meta_path):
     try:
-        meta = json.load(open(meta_path))
+        with open(meta_path) as mf:
+            meta = json.load(mf)
     except Exception:
         pass
 
 if alias:
     meta.setdefault(server, {})['alias'] = alias
-    json.dump(meta, open(meta_path, 'w'), indent=2)
+    with open(meta_path, 'w') as mf:
+        json.dump(meta, mf, indent=2)
     print(f'OK: alias for \"{server}\" set to \"{alias}\"')
 else:
     meta.get(server, {}).pop('alias', None)
     if not meta.get(server):
         meta.pop(server, None)
-    json.dump(meta, open(meta_path, 'w'), indent=2)
+    with open(meta_path, 'w') as mf:
+        json.dump(meta, mf, indent=2)
     print(f'OK: alias for \"{server}\" cleared')
-"
+" CC_META="$META"

@@ -319,14 +319,15 @@ SERVERS=$(qrexec-client-vm dom0 calciumchannel.McpList 2>/dev/null || echo "[]")
 
 # Sync .mcp.json: add/update allowed servers, prune stale calcium-channel entries,
 # and always include the management server entry.
-python3 -c "
-import json, os
+# SECURITY: external data passed via environment, never interpolated into Python code.
+printf '%s' "$SERVERS" | CC_MGMT="$MGMT_SCRIPT" CC_OUTPUT="$OUTPUT" python3 -c "
+import json, os, sys
 
-servers = json.loads('''$SERVERS''')
+servers = json.loads(sys.stdin.readline())
 allowed_names = {srv['name'] for srv in servers}
 
-mgmt_script = '$MGMT_SCRIPT'
-output_path = '$OUTPUT'
+mgmt_script = os.environ['CC_MGMT']
+output_path = os.environ['CC_OUTPUT']
 
 existing = {}
 if os.path.exists(output_path):

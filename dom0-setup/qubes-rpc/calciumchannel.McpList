@@ -15,20 +15,24 @@ fi
 
 # Parse policy file for calciumchannel.Mcp+<name> entries that allow the caller.
 # Include alias from metadata if set.
+# SECURITY: all external values passed via environment, never interpolated into code.
 python3 -c "
-import re, json, os
+import re, json, os, sys
 
-caller = '$CALLER'
+caller = os.environ['CC_CALLER']
+policy_path = os.environ['CC_POLICY']
+meta_path = os.environ['CC_META']
 results = []
 
 meta = {}
-if os.path.exists('$META'):
+if os.path.exists(meta_path):
     try:
-        meta = json.load(open('$META'))
+        with open(meta_path) as mf:
+            meta = json.load(mf)
     except Exception:
         pass
 
-with open('$POLICY') as f:
+with open(policy_path) as f:
     for line in f:
         line = line.strip()
         if not line or line.startswith('#'):
@@ -53,4 +57,4 @@ with open('$POLICY') as f:
             results.append(entry)
 
 print(json.dumps(results, indent=2))
-"
+" CC_CALLER="$CALLER" CC_POLICY="$POLICY" CC_META="$META"
