@@ -1,139 +1,113 @@
 # Calcium Channel
 
-A least-privilege MCP-over-qrexec mesh for Qubes OS. Allows Claude Code instances in different VMs to access MCP servers running in isolated VMs, with dom0 qrexec policy as the ACL layer.
+**MCP servers on isolated Qubes VMs — no AI agent required on the server side.**
 
-Unlike [Salt Bridge](https://github.com/mr-exitgames/salt-bridge) (which grants broad cross-VM control), Calcium Channel *strengthens* Qubes isolation by providing structured, policy-controlled access to specific tools without exposing shells, filesystems, or secrets.
-
-## How it works
-
-MCP's stdio transport (JSON-RPC over stdin/stdout) maps directly onto qrexec's stdin/stdout piping. No proxy daemon, no protocol translation, no new code on the client side.
+Calcium Channel lets you host [MCP](https://modelcontextprotocol.io/) servers in dedicated Qubes OS VMs and access them from any client VM, using only qrexec and dom0 policy. The server VMs never run Claude, never see your prompts, and never touch each other. dom0 policy controls exactly which client can reach which server — per-server, per-VM.
 
 ```
-work-vm                     dom0                        mcp-vm
-───────                     ────                        ──────
-Claude Code                 policy check                MCP server
-  │                           │                           │
-  │ .mcp.json:                │                           │
-  │  "files": {               │                           │
-  │    "command":              │                           │
-  │    "qrexec-client-vm",    │                           │
-  │    "args": ["mcp-vm",     │                           │
-  │     "calciumchannel.      │                           │
-  │      Mcp+files"]          │                           │
-  │  }                        │                           │
-  │                           │                           │
-  ├──stdio──► qrexec ──────► policy: work-vm→mcp-vm? ──► calciumchannel.Mcp
-  │                           ALLOW                       │
-  │                                                       ├─ lookup "files"
-  │                                                       │  in registry.json
-  │                                                       │
-  │◄──────────────── stdio piped ────────────────────────►│ exec mcp server
+┌─────────────────────────────────────────────────────────────────────┐
+│                        How it works                                 │
+│                                                                     │
+│   client-vm            dom0                 mcp-vm                  │
+│  ┌──────────┐     ┌────────────┐      ┌──────────────┐             │
+│  │Claude Code│     │ qrexec     │      │  dispatcher  │             │
+│  │           │────>│ policy     │─────>│  (bash)      │             │
+│  │.mcp.json  │     │ check      │      │      │       │             │
+│  │points to  │     │            │      │      ▼       │             │
+│  │qrexec-    │     │ allow/deny │      │  MCP server  │             │
+│  │client-vm  │<────│            │<─────│  (stdio)     │             │
+│  └──────────┘     └────────────┘      └──────────────┘             │
+│       ▲                                      ▲                      │
+│       │           JSON-RPC over              │                      │
+│       └──────────  qrexec stdin/stdout ──────┘                      │
+│                                                                     │
+│   Runs Claude          No code             No Claude.               │
+│   + management         Just policy.        Just MCP servers         │
+│   MCP server.                              + their secrets.         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-The client VM's `.mcp.json` points `qrexec-client-vm` at the MCP server VM. dom0 checks the qrexec policy. The dispatcher in the MCP VM looks up the server name in a registry and execs it. MCP JSON-RPC flows over the qrexec channel. Zero new daemons.
+## Why
+
+MCP servers often need secrets (API tokens, credentials) and broad tool access. Running them in the same VM as your AI agent means the agent can access those secrets and every other tool on the machine.
+
+Calcium Channel enforces least-privilege by splitting the roles:
+
+- **MCP server VMs** hold secrets and run servers. They have no AI agent, no Claude, no network access to the client.
+- **Client VMs** run Claude Code (or any MCP client). They connect to servers through qrexec — dom0-mediated IPC, not TCP/IP.
+- **dom0 policy** is the only ACL. Per-server, per-client rules. Nothing is allowed unless explicitly granted.
+
+MCP's stdio transport (JSON-RPC over stdin/stdout) maps directly onto qrexec's stdin/stdout piping. No proxy daemon, no protocol translation — just `exec` the server and pipe.
 
 ## Security model
 
-- **MCP servers are jailed** in their own VM with their own secrets (API tokens, credentials). Client VMs never see them.
+- **MCP servers are jailed** in their own VM with their own secrets. Client VMs never see them.
 - **dom0 qrexec policy is the ACL.** Per-server, per-client rules. A VM can only access the MCP servers explicitly allowed by policy.
 - **No network paths are opened.** All communication is qrexec (dom0-mediated IPC), not TCP/IP.
 - **Each connection spawns a fresh MCP server instance.** No shared state between sessions.
 
-## Components
+## Quick start
 
-### dom0
+### 1. Install dom0 services
 
-- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access (parsed from policy). Each VM only sees its own authorized servers. Includes `alias` field if set.
-- **`calciumchannel.McpRegister`** — Registration service. Accepts JSON to add policy rules for a new MCP server. Accepts optional `alias` field. Only callable by the admin VM.
-- **`calciumchannel.McpRename`** — Alias update service. Sets or clears the display alias for a server without touching ACL rules. Only callable by the admin VM.
-- **Policy file** (`30-calcium-channel.policy`) — Per-server ACL rules.
-- **Metadata file** (`30-calcium-channel-meta.json`) — Per-server aliases and other metadata, stored alongside the policy.
-
-### MCP server VM
-
-- **`calciumchannel.Mcp`** — Dispatcher qrexec service. Reads `QREXEC_SERVICE_ARGUMENT` (e.g., `files`), looks it up in the registry, and execs the MCP server.
-- **`/rw/config/calcium-channel/registry.json`** — Maps server names to commands and optional env files.
-
-### Client VM
-
-- **`client-gen.sh`** — Installs the management MCP server, queries `McpList`, and auto-generates `~/.mcp.json` with the correct `qrexec-client-vm` entries.
-- **`calcium-channel-mgmt.py`** — Management MCP server. Exposes `list_servers`, `register_server`, and `refresh_mcps` as MCP tools so agentic workflows can discover and manage servers without dropping to a shell. Installed to `/rw/config/calcium-channel/calcium-channel-mgmt.py` by `client-gen.sh`.
-
-## Installation
-
-### 1. Install in dom0
+In dom0 (two-step — piping directly causes stdin conflicts):
 
 ```bash
-qvm-run -p <source-vm> 'cat /home/user/calcium-channel/dom0-install.sh' > /tmp/cc-install.sh
-bash /tmp/cc-install.sh <source-vm> [admin-vm]
+qvm-run -p SOURCE_VM 'cat /path/to/calcium-channel/dom0-install.sh' > /tmp/cc-install.sh
+bash /tmp/cc-install.sh SOURCE_VM [ADMIN_VM]
 ```
 
-### 2. Set up MCP server VM
+| Argument | Description |
+|----------|-------------|
+| `SOURCE_VM` | VM containing the calcium-channel repo (files are copied from here) |
+| `ADMIN_VM` | VM that can register servers and manage ACLs (defaults to `SOURCE_VM`). Only omit this if `SOURCE_VM` is already a dedicated, isolated qube for Calcium Channel administration. **The admin VM should be an isolated qube** — avoid reusing a general-purpose development VM. |
 
-Copy and run the installer in the VM that will host MCP servers:
+### 2. Set up an MCP server VM
+
+Run in dom0:
 
 ```bash
-# From dom0, or via qvm-copy:
-qvm-run -p <source-vm> 'cat /home/user/calcium-channel/mcp-vm-install.sh' | qvm-run -p <mcp-vm> 'bash -s'
+qvm-run -p SOURCE_VM 'cat /path/to/calcium-channel/mcp-vm-install.sh' \
+  | qvm-run -p MCP_VM 'bash -s'
 ```
 
-Add servers to the registry:
+This installs only the dispatcher and an empty registry. No Claude, no agent code — just a bash script that looks up server names and execs them.
+
+Then add servers to the registry inside the MCP VM:
 
 ```bash
-# In the MCP VM:
 python3 -c "
 import json
 reg = json.load(open('/rw/config/calcium-channel/registry.json'))
-reg['files'] = {
-    'command': 'npx -y @modelcontextprotocol/server-filesystem /home/user'
-}
+reg['files'] = {'command': 'npx -y @modelcontextprotocol/server-filesystem /home/user'}
 json.dump(reg, open('/rw/config/calcium-channel/registry.json', 'w'), indent=2)
 "
 ```
 
-For servers that need credentials, add an env file:
+### 3. Register servers and set ACLs
 
-```bash
-reg['myserver'] = {
-    'command': 'npx -y @example/mcp-server',
-    'env_file': '/rw/config/calcium-channel/env/myserver.env'
-}
-# then:
-echo "API_KEY=..." > /rw/config/calcium-channel/env/myserver.env
-chmod 600 /rw/config/calcium-channel/env/myserver.env
-```
-
-### 3. Register and set ACLs
-
-From the admin VM:
+From the admin VM, tell dom0 which clients can access which servers:
 
 ```bash
 echo '{"server":"files","mcp_vm":"mcp-vm","allow":["work-vm","dev-vm"]}' \
   | qrexec-client-vm dom0 calciumchannel.McpRegister
 ```
 
-Or via the management MCP server (if Claude Code is running in the admin VM):
+Or use the management MCP server (if Claude Code is running in the admin VM):
 
-Use the `register_server` tool with `server="files"`, `mcp_vm="mcp-vm"`, `allow=["work-vm","dev-vm"]`.
-
-To set a display alias after registration (changes the tool namespace prefix in Claude Code):
-
-```bash
-echo '{"server":"signal","alias":"metatron"}' \
-  | qrexec-client-vm dom0 calciumchannel.McpRename
-```
-
-Or via the management MCP server: use the `rename_server` tool with `server="signal"`, `alias="metatron"`. Then call `refresh_mcps` to apply.
+> Use the `register_server` tool with `server="files"`, `mcp_vm="mcp-vm"`, `allow=["work-vm","dev-vm"]`.
 
 ### 4. Configure client VMs
 
-Run in each client VM:
+Run `client-gen.sh` in each VM where Claude Code (or any MCP client) will connect:
 
 ```bash
 ./client-gen.sh
 ```
 
-Or manually add to `~/.mcp.json`:
+This installs a lightweight management MCP server and generates `~/.mcp.json` with the correct `qrexec-client-vm` entries. Restart Claude Code to connect.
+
+Or add entries manually:
 
 ```json
 {
@@ -141,53 +115,113 @@ Or manually add to `~/.mcp.json`:
     "files": {
       "command": "qrexec-client-vm",
       "args": ["mcp-vm", "calciumchannel.Mcp+files"]
-    },
-    "calcium-channel": {
-      "command": "python3",
-      "args": ["/rw/config/calcium-channel/calcium-channel-mgmt.py"]
     }
   }
 }
 ```
 
-Restart Claude Code to connect.
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ dom0 (policy + services)                                                 │
+│                                                                          │
+│  /etc/qubes/policy.d/30-calcium-channel.policy                           │
+│  ┌────────────────────────────────────────────────────────────────┐      │
+│  │ calciumchannel.Mcp +files   work-vm   mcp-vm   allow          │      │
+│  │ calciumchannel.Mcp +files   @anyvm    @anyvm   deny           │      │
+│  │ calciumchannel.Mcp +github  dev-vm    mcp-vm   allow          │      │
+│  │ calciumchannel.Mcp +github  @anyvm    @anyvm   deny           │      │
+│  └────────────────────────────────────────────────────────────────┘      │
+│                                                                          │
+│  Services:                                                               │
+│    McpList      — returns which servers a VM can access                   │
+│    McpRegister  — adds/updates per-server policy rules (admin only)      │
+│    McpRename    — sets display aliases (admin only)                      │
+└──────────────────────────────────────────────────────────────────────────┘
+        │                                       │
+        │ qrexec                                │ qrexec
+        ▼                                       ▼
+┌────────────────────┐               ┌──────────────────────┐
+│ client-vm          │               │ mcp-vm               │
+│                    │               │                      │
+│ .mcp.json:         │   qrexec +   │ calciumchannel.Mcp   │
+│  "files" ──────────│──  stdio  ──>│  ├─ registry.json    │
+│    qrexec-client-vm│               │  │  "files" ->      │
+│    mcp-vm          │<── stdio  ───│  │   npx server-fs   │
+│    calciumchannel. │               │  └─ exec command     │
+│     Mcp+files      │               │                      │
+│                    │               │ No Claude.            │
+│ Claude Code        │               │ No agent.             │
+│ + mgmt MCP server  │               │ Just servers +        │
+│   (optional)       │               │ their secrets.        │
+└────────────────────┘               └──────────────────────┘
+```
+
+### Components
+
+#### dom0
+
+- **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access. Each VM only sees its own authorized servers.
+- **`calciumchannel.McpRegister`** — Registration service. Adds per-server policy rules. Only callable by the admin VM.
+- **`calciumchannel.McpRename`** — Alias service. Sets or clears display aliases without touching ACL rules. Only callable by the admin VM.
+- **Policy file** (`30-calcium-channel.policy`) — Per-server ACL rules with `+argument` suffix for granular control.
+- **Metadata file** (`30-calcium-channel-meta.json`) — Display aliases, stored alongside the policy.
+
+#### MCP server VM
+
+- **`calciumchannel.Mcp`** — Dispatcher. Reads `QREXEC_SERVICE_ARGUMENT`, looks up the server name in the registry, and execs it. A plain bash script — no dependencies beyond Python 3 (for JSON parsing).
+- **`registry.json`** — Maps server names to commands. Lives in `/rw/config/calcium-channel/` (persistent across AppVM reboots).
+
+#### Client VM
+
+- **`client-gen.sh`** — Installs the management MCP server, queries `McpList`, and generates `~/.mcp.json`.
+- **`calcium-channel-mgmt.py`** — Management MCP server (optional). Exposes Calcium Channel management as MCP tools for agentic workflows.
 
 ## Management MCP server
 
-`client-gen.sh` installs a local MCP server (`calcium-channel-mgmt.py`) that exposes Calcium Channel management as tools, enabling agentic workflows without dropping to a shell.
+`client-gen.sh` installs a local management MCP server that exposes Calcium Channel operations as tools. This is optional — you can manage everything via the shell commands above.
 
 | Tool | Description | Authorization |
 |------|-------------|---------------|
 | `list_servers` | List MCP servers this VM can access | Any VM |
-| `register_server` | Register a server and set ACLs. Accepts optional `alias`. | Admin VM only (dom0 enforces) |
-| `rename_server` | Set or clear the display alias for a server | Admin VM only (dom0 enforces) |
+| `register_server` | Register a server and set ACLs | Admin VM only (dom0 enforces) |
+| `rename_server` | Set or clear a display alias | Admin VM only (dom0 enforces) |
 | `refresh_mcps` | Re-sync `~/.mcp.json` and prune stale entries | Any VM |
 
-Because dom0 policy enforces `McpRegister` access, `register_server` simply fails for non-admin VMs — no special logic needed in the script. The same server can be deployed identically on both client VMs (read-only use) and the admin VM (full management).
+dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and `rename_server` simply fail for non-admin VMs. The same management server works identically in both client VMs (read-only) and the admin VM (full management).
 
-`refresh_mcps` is useful after an admin grants or revokes access: call the tool, then restart Claude Code to pick up the updated config.
+**Aliases**: You can set a display alias for any server (e.g., `rename_server("signal", "metatron")`). The alias becomes the key in `.mcp.json` and the tool namespace prefix in Claude Code. Call `refresh_mcps` after renaming, then restart Claude Code.
 
 ## File structure
 
 ```
 calcium-channel/
-├── dom0-install.sh                        # dom0 installer
+├── dom0-install.sh                        # dom0 installer (two-step)
 ├── dom0-setup/
 │   ├── policy.d/
 │   │   └── 30-calcium-channel.policy      # ACL policy template
 │   └── qubes-rpc/
-│       ├── calciumchannel.McpList         # Discovery service (returns alias if set)
-│       ├── calciumchannel.McpRegister     # Registration service (accepts optional alias)
-│       └── calciumchannel.McpRename       # Alias update service (admin only)
-├── mcp-vm-install.sh                      # MCP VM installer
+│       ├── calciumchannel.McpList         # Discovery service
+│       ├── calciumchannel.McpRegister     # Registration service (admin only)
+│       └── calciumchannel.McpRename       # Alias service (admin only)
+├── mcp-vm-install.sh                      # MCP VM installer (dispatcher only)
 ├── mcp-vm/
 │   ├── qubes-rpc/
 │   │   └── calciumchannel.Mcp            # MCP server dispatcher
 │   └── registry.json                      # Example registry
 ├── calcium-channel-mgmt.py               # Management MCP server (source)
-└── client-gen.sh                          # Client setup: installs mgmt server + syncs .mcp.json
+└── client-gen.sh                          # Client setup: mgmt server + .mcp.json sync
 ```
 
-## Related projects
+## Updating
 
-- **[Salt Bridge](https://github.com/mr-exitgames/salt-bridge)** — Privileged cross-VM admin MCP server. Use when you need full system control (debugging, template management, firewall rules). Different trust model — Salt Bridge bypasses isolation, Calcium Channel enforces it.
+After making changes to the repo:
+
+- **dom0 services or policy** — re-run the two-step dom0 installer
+- **MCP VM dispatcher** — re-run `mcp-vm-install.sh` in the target VM
+- **Client config** — re-run `client-gen.sh` in client VMs, then restart Claude Code
+
+## License
+
+MIT

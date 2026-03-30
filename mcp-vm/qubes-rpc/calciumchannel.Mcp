@@ -41,20 +41,5 @@ if [[ -z "$COMMAND" ]]; then
     exit 1
 fi
 
-# Load env file if specified
-ENV_FILE=$(python3 -c "
-import json
-with open('$REGISTRY') as f:
-    reg = json.load(f)
-ef = reg.get('$SERVER_NAME', {}).get('env_file', '')
-print(ef)
-" 2>/dev/null)
-
-if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
-    set -a
-    source "$ENV_FILE"
-    set +a
-fi
-
 # Exec the MCP server — its stdin/stdout become the qrexec channel
 exec $COMMAND

@@ -1,5 +1,4 @@
 {
-  "_comment": "Calcium Channel MCP server registry. Install to /rw/config/calcium-channel/registry.json",
   "files": {
     "command": "npx -y @modelcontextprotocol/server-filesystem /home/user"
   }
