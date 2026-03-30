@@ -208,9 +208,9 @@ calcium-channel/
 ├── mcp-vm-install.sh                      # MCP VM installer (dispatcher only)
 ├── mcp-vm/
 │   ├── qubes-rpc/
-│   │   └── calciumchannel.Mcp            # MCP server dispatcher
+│   │   └── calciumchannel.Mcp             # MCP server dispatcher
 │   └── registry.json                      # Example registry
-├── calcium-channel-mgmt.py               # Management MCP server (source)
+├── calcium-channel-mgmt.py                # Management MCP server (source)
 └── client-gen.sh                          # Client setup: mgmt server + .mcp.json sync
 ```
 
