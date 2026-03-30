@@ -9,14 +9,14 @@ Calcium Channel lets you host [MCP](https://modelcontextprotocol.io/) servers in
 │                        How it works                                 │
 │                                                                     │
 │   client-vm            dom0                 mcp-vm                  │
-│  ┌──────────┐     ┌────────────┐      ┌──────────────┐             │
+│  ┌───────────┐     ┌────────────┐      ┌──────────────┐             │
 │  │Claude Code│     │ qrexec     │      │  dispatcher  │             │
 │  │           │────>│ policy     │─────>│  (bash)      │             │
 │  │.mcp.json  │     │ check      │      │      │       │             │
 │  │points to  │     │            │      │      ▼       │             │
 │  │qrexec-    │     │ allow/deny │      │  MCP server  │             │
 │  │client-vm  │<────│            │<─────│  (stdio)     │             │
-│  └──────────┘     └────────────┘      └──────────────┘             │
+│  └───────────┘     └────────────┘      └──────────────┘             │
 │       ▲                                      ▲                      │
 │       │           JSON-RPC over              │                      │
 │       └──────────  qrexec stdin/stdout ──────┘                      │
@@ -57,10 +57,10 @@ qvm-run -p SOURCE_VM 'cat /path/to/calcium-channel/dom0-install.sh' > /tmp/cc-in
 bash /tmp/cc-install.sh SOURCE_VM [ADMIN_VM]
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `SOURCE_VM` | VM containing the calcium-channel repo (files are copied from here) |
-| `ADMIN_VM` | VM that can register servers and manage ACLs (defaults to `SOURCE_VM`). Only omit this if `SOURCE_VM` is already a dedicated, isolated qube for Calcium Channel administration. **The admin VM should be an isolated qube** — avoid reusing a general-purpose development VM. |
+|  Argument   | Description |
+|-------------|-------------|
+| `SOURCE_VM` | VM containing the calcium-channel repo (files are copied from here)
+| `ADMIN_VM`  | VM that can register servers and manage ACLs (defaults to `SOURCE_VM`). Only omit this if `SOURCE_VM` is already a dedicated, isolated qube for Calcium Channel administration. **The admin VM should be an isolated qube** — avoid reusing a general-purpose development VM.
 
 ### 2. Set up an MCP server VM
 
@@ -128,14 +128,14 @@ Or add entries manually:
 │                                                                          │
 │  /etc/qubes/policy.d/30-calcium-channel.policy                           │
 │  ┌────────────────────────────────────────────────────────────────┐      │
-│  │ calciumchannel.Mcp +files   work-vm   mcp-vm   allow          │      │
-│  │ calciumchannel.Mcp +files   @anyvm    @anyvm   deny           │      │
-│  │ calciumchannel.Mcp +github  dev-vm    mcp-vm   allow          │      │
-│  │ calciumchannel.Mcp +github  @anyvm    @anyvm   deny           │      │
+│  │ calciumchannel.Mcp +files   work-vm   mcp-vm   allow           │      │
+│  │ calciumchannel.Mcp +files   @anyvm    @anyvm   deny            │      │
+│  │ calciumchannel.Mcp +github  dev-vm    mcp-vm   allow           │      │
+│  │ calciumchannel.Mcp +github  @anyvm    @anyvm   deny            │      │
 │  └────────────────────────────────────────────────────────────────┘      │
 │                                                                          │
 │  Services:                                                               │
-│    McpList      — returns which servers a VM can access                   │
+│    McpList      — returns which servers a VM can access                  │
 │    McpRegister  — adds/updates per-server policy rules (admin only)      │
 │    McpRename    — sets display aliases (admin only)                      │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -145,16 +145,16 @@ Or add entries manually:
 ┌────────────────────┐               ┌──────────────────────┐
 │ client-vm          │               │ mcp-vm               │
 │                    │               │                      │
-│ .mcp.json:         │   qrexec +   │ calciumchannel.Mcp   │
-│  "files" ──────────│──  stdio  ──>│  ├─ registry.json    │
-│    qrexec-client-vm│               │  │  "files" ->      │
-│    mcp-vm          │<── stdio  ───│  │   npx server-fs   │
+│ .mcp.json:         │   qrexec +    │ calciumchannel.Mcp   │
+│  "files" ──────────│──  stdio  ───>│  ├─ registry.json    │
+│    qrexec-client-vm│               │  │  "files" ->       │
+│    mcp-vm          │<── stdio  ────│  │   npx server-fs   │
 │    calciumchannel. │               │  └─ exec command     │
 │     Mcp+files      │               │                      │
-│                    │               │ No Claude.            │
-│ Claude Code        │               │ No agent.             │
-│ + mgmt MCP server  │               │ Just servers +        │
-│   (optional)       │               │ their secrets.        │
+│                    │               │ No Claude.           │
+│ Claude Code        │               │ No agent.            │
+│ + mgmt MCP server  │               │ Just servers +       │
+│   (optional)       │               │ their secrets.       │
 └────────────────────┘               └──────────────────────┘
 ```
 
@@ -182,12 +182,12 @@ Or add entries manually:
 
 `client-gen.sh` installs a local management MCP server that exposes Calcium Channel operations as tools. This is optional — you can manage everything via the shell commands above.
 
-| Tool | Description | Authorization |
-|------|-------------|---------------|
-| `list_servers` | List MCP servers this VM can access | Any VM |
-| `register_server` | Register a server and set ACLs | Admin VM only (dom0 enforces) |
-| `rename_server` | Set or clear a display alias | Admin VM only (dom0 enforces) |
-| `refresh_mcps` | Re-sync `~/.mcp.json` and prune stale entries | Any VM |
+| Tool              | Description                                                    | Authorization                   |
+|-------------------|----------------------------------------------------------------|---------------------------------|
+| `list_servers`    | List MCP servers this VM can access                            | Any VM                          |
+| `register_server` | Register a server and set ACLs                                 | Admin VM only (dom0 enforces)   |
+| `rename_server`   | Set or clear a display alias                                   | Admin VM only (dom0 enforces)   |
+| `refresh_mcps`    | Re-sync `~/.mcp.json` and prune stale entries                  | Any VM                          |
 
 dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and `rename_server` simply fail for non-admin VMs. The same management server works identically in both client VMs (read-only) and the admin VM (full management).
 
@@ -222,6 +222,6 @@ After making changes to the repo:
 - **MCP VM dispatcher** — re-run `mcp-vm-install.sh` in the target VM
 - **Client config** — re-run `client-gen.sh` in client VMs, then restart Claude Code
 
-## License
+## Credits
 
-MIT
+Built by [Claude](https://claude.ai) with help from [@mr-exitgames](https://github.com/mr-exitgames).
