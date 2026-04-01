@@ -29,22 +29,24 @@ if [[ ! -f "$REGISTRY" ]]; then
     exit 1
 fi
 
+# SECURITY: values passed via environment, never interpolated into Python code.
 COMMAND=$(python3 -c "
-import json, sys
-with open('$REGISTRY') as f:
+import json, sys, os
+with open(os.environ['CC_REGISTRY']) as f:
     reg = json.load(f)
-server = reg.get('$SERVER_NAME')
+server = reg.get(os.environ['CC_SERVER'])
 if not server:
+    print('NOT_FOUND', file=sys.stderr)
     sys.exit(1)
 print(server['command'])
-" 2>/dev/null)
+" CC_REGISTRY="$REGISTRY" CC_SERVER="$SERVER_NAME" 2>/dev/null)
 
 if [[ -z "$COMMAND" ]]; then
     echo '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Unknown MCP server: '"$SERVER_NAME"'"},"id":null}' >&2
     exit 1
 fi
 
-exec $COMMAND
+exec bash -c "$COMMAND"
 DISPATCHER
 
 chmod 755 /rw/config/calcium-channel/calciumchannel.Mcp

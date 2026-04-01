@@ -56,5 +56,14 @@ with open(policy_path) as f:
                 entry['alias'] = alias
             results.append(entry)
 
+# Deduplicate by server name (keep first match)
+seen = set()
+unique = []
+for entry in results:
+    if entry['name'] not in seen:
+        seen.add(entry['name'])
+        unique.append(entry)
+results = unique
+
 print(json.dumps(results, indent=2))
 " CC_CALLER="$CALLER" CC_POLICY="$POLICY" CC_META="$META"

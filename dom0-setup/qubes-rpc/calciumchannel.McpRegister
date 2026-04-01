@@ -4,6 +4,7 @@
 # Appends policy rules to 30-calcium-channel.policy
 
 POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
+LOCKFILE="/tmp/calcium-channel-register.lock"
 
 # Read first line from stdin (single-line JSON payload)
 read -t 5 -r payload || true
@@ -16,6 +17,10 @@ fi
 # Parse JSON and generate new policy to a temp file.
 # SECURITY: payload is passed via stdin to Python, never interpolated into code.
 TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
+
+# Acquire exclusive lock to prevent concurrent policy clobbering
+exec 9>"$LOCKFILE"
+flock -w 10 9 || { echo "ERROR: could not acquire lock"; exit 1; }
 
 printf '%s' "$payload" | python3 -c "
 import json, sys, re, os
@@ -104,5 +109,9 @@ if [[ $? -eq 0 ]]; then
     rm -f "$TMPFILE"
 else
     rm -f "$TMPFILE"
+    flock -u 9
     exit 1
 fi
+
+# Release lock
+flock -u 9
