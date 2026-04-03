@@ -26,16 +26,17 @@ fi
 
 # Extract command for this server from registry
 # SECURITY: values passed via environment, never interpolated into Python code.
-COMMAND=$(python3 -c "
-import json, sys, os
+COMMAND=$(CC_REGISTRY="$REGISTRY" CC_SERVER="$SERVER_NAME" python3 -c "
+import json, sys, os, shlex
 with open(os.environ['CC_REGISTRY']) as f:
     reg = json.load(f)
 server = reg.get(os.environ['CC_SERVER'])
 if not server:
     print('NOT_FOUND', file=sys.stderr)
     sys.exit(1)
-print(server['command'])
-" CC_REGISTRY="$REGISTRY" CC_SERVER="$SERVER_NAME" 2>/dev/null)
+parts = [server['command']] + server.get('args', [])
+print(' '.join(shlex.quote(p) for p in parts))
+" 2>/dev/null)
 
 if [[ -z "$COMMAND" ]]; then
     echo '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Unknown MCP server: '"$SERVER_NAME"'"},"id":null}' >&2
