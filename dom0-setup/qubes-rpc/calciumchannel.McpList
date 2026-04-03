@@ -16,7 +16,7 @@ fi
 # Parse policy file for calciumchannel.Mcp+<name> entries that allow the caller.
 # Include alias from metadata if set.
 # SECURITY: all external values passed via environment, never interpolated into code.
-python3 -c "
+CC_CALLER="$CALLER" CC_POLICY="$POLICY" CC_META="$META" python3 -c "
 import re, json, os, sys
 
 caller = os.environ['CC_CALLER']
@@ -66,4 +66,4 @@ for entry in results:
 results = unique
 
 print(json.dumps(results, indent=2))
-" CC_CALLER="$CALLER" CC_POLICY="$POLICY" CC_META="$META"
+"

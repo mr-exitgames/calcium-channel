@@ -14,7 +14,7 @@ if [[ -z "$payload" ]]; then
 fi
 
 # SECURITY: payload is passed via stdin to Python, never interpolated into code.
-printf '%s' "$payload" | python3 -c "
+printf '%s' "$payload" | CC_META="$META" python3 -c "
 import json, sys, re, os
 
 payload = sys.stdin.readline()
@@ -66,4 +66,4 @@ else:
     with open(meta_path, 'w') as mf:
         json.dump(meta, mf, indent=2)
     print(f'OK: alias for \"{server}\" cleared')
-" CC_META="$META"
+"

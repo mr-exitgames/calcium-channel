@@ -22,7 +22,7 @@ TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
 exec 9>"$LOCKFILE"
 flock -w 10 9 || { echo "ERROR: could not acquire lock"; exit 1; }
 
-printf '%s' "$payload" | python3 -c "
+printf '%s' "$payload" | CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE" python3 -c "
 import json, sys, re, os
 
 payload = sys.stdin.readline()
@@ -102,7 +102,7 @@ if alias is not None:
 
 alias_note = f', alias={alias!r}' if alias else ''
 print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}{alias_note}')
-" CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE"
+"
 
 if [[ $? -eq 0 ]]; then
     sudo tee "$POLICY" < "$TMPFILE" > /dev/null
