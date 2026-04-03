@@ -2,7 +2,7 @@
 
 > **⚠️ Experimental** — This project is under active development and has not been formally audited. Do not rely on it for security-sensitive systems. Use at your own risk.
 
-**MCP servers on isolated Qubes VMs — no AI agent required on the server side.**
+**MCP servers on isolated Qubes VMs.**
 
 Calcium Channel lets you host [MCP](https://modelcontextprotocol.io/) servers in dedicated Qubes OS VMs and access them from any client VM, using only qrexec and dom0 policy. The server VMs never run Claude, never see your prompts, and never touch each other. dom0 policy controls exactly which client can reach which server — per-server, per-VM.
 
