@@ -23,9 +23,9 @@ Calcium Channel lets you host [MCP](https://modelcontextprotocol.io/) servers in
 │       │           JSON-RPC over              │                      │
 │       └──────────  qrexec stdin/stdout ──────┘                      │
 │                                                                     │
-│   Runs Claude          No code             No Claude.               │
-│   + management         Just policy.        Just MCP servers         │
-│   MCP server.                              + their secrets.         │
+│   Runs Claude          No code             MCP servers              │
+│   + management         Just policy.        + their privileges       │
+│   MCP server.                              + their secrets          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,7 +73,7 @@ qvm-run -p SOURCE_VM 'cat /path/to/calcium-channel/mcp-vm-install.sh' \
   | qvm-run -p MCP_VM 'bash -s'
 ```
 
-This installs only the dispatcher and an empty registry. No Claude, no agent code — just a bash script that looks up server names and execs them.
+This installs only the dispatcher and an empty registry.
 
 Then add servers to the registry inside the MCP VM:
 
@@ -162,10 +162,10 @@ Or add entries manually:
 │    mcp-vm          │<── stdio  ────│  │   npx server-fs   │
 │    calciumchannel. │               │  └─ exec command     │
 │     Mcp+files      │               │                      │
-│                    │               │ No Claude.           │
-│ Claude Code        │               │ No agent.            │
-│ + mgmt MCP server  │               │ Just servers +       │
-│   (optional)       │               │ their secrets.       │
+│                    │               │                      │
+│ Claude Code        │               │  MCP Server +        │
+│ + mgmt MCP server  │               │  secrets/privileges  │
+│   (optional)       │               │                      │
 └────────────────────┘               └──────────────────────┘
 ```
 
@@ -208,6 +208,81 @@ dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and 
 
 **Aliases**: You can set a display alias for any server (e.g., `rename_server("signal", "metatron")`). The alias becomes the key in `.mcp.json` and the tool namespace prefix in Claude Code. Call `refresh_mcps` after renaming, then restart Claude Code.
 
+## Admin CLI (`cc-admin`)
+
+`cc-admin` is a stdlib-only Python wrapper around the dom0 qrexec services, for manual administration without an AI agent. Run it from the admin VM — the same dom0 policy that gates the management MCP server gates this CLI.
+
+| Subcommand                                           | Description                                             |
+|------------------------------------------------------|---------------------------------------------------------|
+| `list [--json]`                                      | Servers this VM can access.                             |
+| `list-all [--json]`                                  | Full ACL matrix. Admin only.                            |
+| `register SERVER MCP_VM VM [VM ...] [--alias ALIAS]` | Replace the ACL for `SERVER` with the given VMs.        |
+| `grant SERVER SOURCE_VM`                             | Add one VM to `SERVER`'s existing allow list.           |
+| `revoke SERVER SOURCE_VM`                            | Remove one allow rule.                                  |
+| `unregister SERVER`                                  | Drop every rule (and alias) for `SERVER`.               |
+| `rename SERVER [ALIAS]`                              | Set the display alias. Omit `ALIAS` to clear it.        |
+
+### Worked example
+
+Suppose `vault-vm` is an MCP server VM that exposes three MCP services (`notes`, `calendar`, `tasks`), and you want to grant `work-vm` access to all three, then later add `research-vm` to just `notes`.
+
+**1. On `vault-vm`** — add the services to the registry (one-time):
+
+```bash
+python3 -c "
+import json, pathlib
+p = pathlib.Path('/rw/config/calcium-channel/registry.json')
+reg = json.loads(p.read_text())
+reg['notes']    = {'command': 'npx -y some-notes-mcp'}
+reg['calendar'] = {'command': 'npx -y some-calendar-mcp'}
+reg['tasks']    = {'command': 'npx -y some-tasks-mcp'}
+p.write_text(json.dumps(reg, indent=2))
+"
+```
+
+**2. From the admin VM** — register ACLs:
+
+```bash
+./cc-admin register notes    vault-vm work-vm
+./cc-admin register calendar vault-vm work-vm
+./cc-admin register tasks    vault-vm work-vm
+```
+
+**3. Inspect:**
+
+```bash
+./cc-admin list-all
+# notes -> vault-vm
+#     allow work-vm -> vault-vm
+#     deny  @anyvm  -> @anyvm
+# calendar -> vault-vm
+#     allow work-vm -> vault-vm
+#     deny  @anyvm  -> @anyvm
+# tasks -> vault-vm
+#     allow work-vm -> vault-vm
+#     deny  @anyvm  -> @anyvm
+```
+
+**4. Add a second client to one service** — `grant` preserves the existing allow list (and alias):
+
+```bash
+./cc-admin grant notes research-vm
+```
+
+**5. Set a display alias, then revoke or remove:**
+
+```bash
+./cc-admin rename notes scratchpad        # alias becomes the key in .mcp.json
+./cc-admin revoke notes research-vm       # remove just research-vm's access
+./cc-admin unregister calendar            # drop the whole channel
+```
+
+**6. On each client VM** — sync `.mcp.json` and restart the MCP client:
+
+```bash
+./client-install.sh
+```
+
 ## File structure
 
 ```
@@ -228,6 +303,7 @@ calcium-channel/
 │   │   └── calciumchannel.Mcp             # MCP server dispatcher
 │   └── registry.json                      # Example registry
 ├── calcium-channel-mgmt.py                # Management MCP server (source)
+├── cc-admin                               # Admin CLI (run from admin VM)
 └── client-install.sh                      # Client setup: mgmt server + .mcp.json sync
 ```
 
