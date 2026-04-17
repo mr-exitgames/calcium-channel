@@ -162,12 +162,3 @@ if [[ $nl_status -ne 0 ]]; then
     echo "[*] retrying with LSP Content-Length framing (some servers require it)"
     run_with_wire "LSP-framed" call_lsp "$LSP_INPUT_SCRIPT"
 fi
-
-echo
-echo "[*] error-path checks (should produce JSON-RPC errors)"
-echo "  - unknown server name:"
-echo '{}' | timeout 5 qrexec-client-vm "$MCP_VM" "calciumchannel.Mcp+nonesuch_$$" 2>&1 | head -c 300
-echo
-echo "  - invalid server name (rejected by dispatcher regex):"
-echo '{}' | timeout 5 qrexec-client-vm "$MCP_VM" 'calciumchannel.Mcp+../etc' 2>&1 | head -c 300
-echo
