@@ -14,11 +14,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DISPATCHER_SRC="$SCRIPT_DIR/mcp-vm/qubes-rpc/calciumchannel.Mcp"
+BRIDGE_SRC="$SCRIPT_DIR/mcp-vm/qubes-rpc/framing-bridge.py"
 
 if [[ ! -f "$DISPATCHER_SRC" ]]; then
     echo "ERROR: dispatcher not found at $DISPATCHER_SRC" >&2
     echo "Run this from a checkout of the calcium-channel repo, or use the tar pipe form" >&2
     echo "documented at the top of this script." >&2
+    exit 1
+fi
+if [[ ! -f "$BRIDGE_SRC" ]]; then
+    echo "ERROR: framing bridge not found at $BRIDGE_SRC" >&2
     exit 1
 fi
 
@@ -45,6 +50,9 @@ echo "  + /rw/config/calcium-channel/calciumchannel.Mcp"
 
 $SUDO install -m 755 "$DISPATCHER_SRC" /etc/qubes-rpc/calciumchannel.Mcp
 echo "  + /etc/qubes-rpc/calciumchannel.Mcp"
+
+$SUDO install -m 755 "$BRIDGE_SRC" /rw/config/calcium-channel/framing-bridge.py
+echo "  + /rw/config/calcium-channel/framing-bridge.py"
 
 # Persist across reboots: rc.local copies the dispatcher back into /etc/qubes-rpc.
 RCLOCAL="/rw/config/rc.local"

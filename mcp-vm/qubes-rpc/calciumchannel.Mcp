@@ -78,4 +78,9 @@ if [[ -n "$ENV_FILE" ]]; then
     set +a
 fi
 
-exec bash -c "$COMMAND"
+BRIDGE="/rw/config/calcium-channel/framing-bridge.py"
+if [[ -x "$BRIDGE" ]]; then
+    exec python3 "$BRIDGE" -- bash -c "$COMMAND"
+else
+    exec bash -c "$COMMAND"
+fi
