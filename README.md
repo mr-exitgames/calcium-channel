@@ -224,21 +224,22 @@ dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and 
 
 ### Worked example
 
-Suppose `vault-vm` is an MCP server VM that exposes three MCP services (`notes`, `calendar`, `tasks`), and you want to grant `work-vm` access to all three, then later add `research-vm` to just `notes`.
+Suppose `vault-vm` is an MCP server VM that exposes two MCP services (`notes` and `calendar`), and you want to grant `work-vm` access to both, then later add `research-vm` to just `notes`.
 
-**1. On `vault-vm`** — add the services to the registry (one-time):
+**1. On `vault-vm`** — write the registry at `/rw/config/calcium-channel/registry.json` (one-time):
 
-```bash
-python3 -c "
-import json, pathlib
-p = pathlib.Path('/rw/config/calcium-channel/registry.json')
-reg = json.loads(p.read_text())
-reg['notes']    = {'command': 'npx -y some-notes-mcp'}
-reg['calendar'] = {'command': 'npx -y some-calendar-mcp'}
-reg['tasks']    = {'command': 'npx -y some-tasks-mcp'}
-p.write_text(json.dumps(reg, indent=2))
-"
+```json
+{
+  "notes": {
+    "command": "npx -y some-notes-mcp"
+  },
+  "calendar": {
+    "command": "npx -y some-calendar-mcp"
+  }
+}
 ```
+
+Each top-level key is the service name; `command` is the shell command the dispatcher will `exec` when a client connects.
 
 **2. From the admin VM** — register ACLs. The positional args are `SERVER MCP_VM CLIENT_VM [CLIENT_VM ...]`: the service name (must match the registry key on the MCP VM), the VM hosting it, and one-or-more client VMs (where Claude Code or another MCP client runs) to grant access:
 
@@ -246,7 +247,6 @@ p.write_text(json.dumps(reg, indent=2))
 #                   server   mcp-vm   client-vm(s)
 ./cc-admin register notes    vault-vm work-vm
 ./cc-admin register calendar vault-vm work-vm
-./cc-admin register tasks    vault-vm work-vm
 ```
 
 **3. Inspect:**
@@ -257,9 +257,6 @@ p.write_text(json.dumps(reg, indent=2))
 #     allow work-vm -> vault-vm
 #     deny  @anyvm  -> @anyvm
 # calendar -> vault-vm
-#     allow work-vm -> vault-vm
-#     deny  @anyvm  -> @anyvm
-# tasks -> vault-vm
 #     allow work-vm -> vault-vm
 #     deny  @anyvm  -> @anyvm
 ```
