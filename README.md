@@ -246,22 +246,25 @@ Each top-level key is the service name; `command` is the shell command the dispa
 ```bash
 #                   server   mcp-vm   client-vm(s)
 ./cc-admin register notes    vault-vm work-vm
-./cc-admin register calendar vault-vm work-vm
+./cc-admin register calendar vault-vm work-vm research-vm
 ```
+
+Pass multiple client VMs to grant them all access in one call (as with `calendar` above).
 
 **3. Inspect:**
 
 ```bash
 ./cc-admin list-all
 # notes -> vault-vm
-#     allow work-vm -> vault-vm
-#     deny  @anyvm  -> @anyvm
+#     allow work-vm     -> vault-vm
+#     deny  @anyvm      -> @anyvm
 # calendar -> vault-vm
-#     allow work-vm -> vault-vm
-#     deny  @anyvm  -> @anyvm
+#     allow work-vm     -> vault-vm
+#     allow research-vm -> vault-vm
+#     deny  @anyvm      -> @anyvm
 ```
 
-**4. Add a second client to one service** — `grant` preserves the existing allow list (and alias):
+**4. Add another client to `notes`** — `grant` preserves the existing allow list (and alias):
 
 ```bash
 ./cc-admin grant notes research-vm
