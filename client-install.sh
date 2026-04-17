@@ -10,9 +10,11 @@ MGMT_SCRIPT="/rw/config/calcium-channel/calcium-channel-mgmt.py"
 
 echo "[*] Calcium Channel — client setup"
 
-# Install management MCP server (persistent across reboots)
-mkdir -p /rw/config/calcium-channel
-cat > "$MGMT_SCRIPT" << 'MGMT_EOF'
+# Install management MCP server (persistent across reboots).
+# /rw/config is root-owned; use sudo so the user can run this script as
+# themselves and get ~/.mcp.json in their own home (not /root).
+sudo mkdir -p /rw/config/calcium-channel
+sudo tee "$MGMT_SCRIPT" > /dev/null << 'MGMT_EOF'
 #!/usr/bin/env python3
 """
 Calcium Channel — Management MCP server
@@ -310,7 +312,7 @@ def main():
 if __name__ == "__main__":
     main()
 MGMT_EOF
-chmod 755 "$MGMT_SCRIPT"
+sudo chmod 755 "$MGMT_SCRIPT"
 echo "  + $MGMT_SCRIPT"
 
 # Query dom0 for allowed servers (may be empty if none are granted yet)
