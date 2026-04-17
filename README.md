@@ -107,7 +107,14 @@ Run `client-install.sh` in each VM where Claude Code (or any MCP client) will co
 ./client-install.sh
 ```
 
-This installs a lightweight management MCP server and generates `~/.mcp.json` with the correct `qrexec-client-vm` entries. Restart Claude Code to connect.
+This installs a lightweight management MCP server and writes the correct `qrexec-client-vm` entries into every detected client config:
+
+- `~/.mcp.json` — always written (Claude Code's project convention).
+- `~/.claw/settings.json` — if `~/.claw/` exists.
+- `~/.gemini/settings.json` — if `~/.gemini/` exists (gemini-cli).
+- `~/.qwen/settings.json` — if `~/.qwen/` exists (qwen-code).
+
+Other keys in those settings files are preserved; only `mcpServers` is touched. Pass an explicit path (`./client-install.sh /path/to/config.json`) to write a single file instead. Restart the affected client to connect.
 
 Or add entries manually:
 
@@ -177,7 +184,7 @@ Or add entries manually:
 
 #### Client VM
 
-- **`client-install.sh`** — Installs the management MCP server, queries `McpList`, and generates `~/.mcp.json`.
+- **`client-install.sh`** — Installs the management MCP server, queries `McpList`, and syncs each detected client config (`~/.mcp.json` plus `~/.claw/settings.json`, `~/.gemini/settings.json`, `~/.qwen/settings.json` when those dirs exist).
 - **`calcium-channel-mgmt.py`** — Management MCP server (optional). Exposes Calcium Channel management as MCP tools for agentic workflows.
 
 ## Management MCP server
@@ -189,7 +196,7 @@ Or add entries manually:
 | `list_servers`    | List MCP servers this VM can access                            | Any VM                          |
 | `register_server` | Register a server and set ACLs                                 | Admin VM only (dom0 enforces)   |
 | `rename_server`   | Set or clear a display alias                                   | Admin VM only (dom0 enforces)   |
-| `refresh_mcps`    | Re-sync `~/.mcp.json` and prune stale entries                  | Any VM                          |
+| `refresh_mcps`    | Re-sync every detected client config (or one path if passed)   | Any VM                          |
 
 dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and `rename_server` simply fail for non-admin VMs. The same management server works identically in both client VMs (read-only) and the admin VM (full management).
 
