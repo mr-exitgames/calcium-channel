@@ -2,7 +2,7 @@
 
 > **⚠️ Experimental** — This project is under active development and has not been formally audited. Do not rely on it for security-sensitive systems. Use at your own risk.
 
-**MCP servers on isolated Qubes VMs — no AI agent required on the server side.**
+**MCP servers on isolated Qubes VMs.**
 
 Calcium Channel lets you host [MCP](https://modelcontextprotocol.io/) servers in dedicated Qubes OS VMs and access them from any client VM, using only qrexec and dom0 policy. The server VMs never run Claude, never see your prompts, and never touch each other. dom0 policy controls exactly which client can reach which server — per-server, per-VM.
 
@@ -101,10 +101,10 @@ Or use the management MCP server (if Claude Code is running in the admin VM):
 
 ### 4. Configure client VMs
 
-Run `client-gen.sh` in each VM where Claude Code (or any MCP client) will connect:
+Run `client-install.sh` in each VM where Claude Code (or any MCP client) will connect:
 
 ```bash
-./client-gen.sh
+./client-install.sh
 ```
 
 This installs a lightweight management MCP server and generates `~/.mcp.json` with the correct `qrexec-client-vm` entries. Restart Claude Code to connect.
@@ -177,12 +177,12 @@ Or add entries manually:
 
 #### Client VM
 
-- **`client-gen.sh`** — Installs the management MCP server, queries `McpList`, and generates `~/.mcp.json`.
+- **`client-install.sh`** — Installs the management MCP server, queries `McpList`, and generates `~/.mcp.json`.
 - **`calcium-channel-mgmt.py`** — Management MCP server (optional). Exposes Calcium Channel management as MCP tools for agentic workflows.
 
 ## Management MCP server
 
-`client-gen.sh` installs a local management MCP server that exposes Calcium Channel operations as tools. This is optional — you can manage everything via the shell commands above.
+`client-install.sh` installs a local management MCP server that exposes Calcium Channel operations as tools. This is optional — you can manage everything via the shell commands above.
 
 | Tool              | Description                                                    | Authorization                   |
 |-------------------|----------------------------------------------------------------|---------------------------------|
@@ -213,7 +213,7 @@ calcium-channel/
 │   │   └── calciumchannel.Mcp             # MCP server dispatcher
 │   └── registry.json                      # Example registry
 ├── calcium-channel-mgmt.py                # Management MCP server (source)
-└── client-gen.sh                          # Client setup: mgmt server + .mcp.json sync
+└── client-install.sh                      # Client setup: mgmt server + .mcp.json sync
 ```
 
 ## Updating
@@ -222,7 +222,7 @@ After making changes to the repo:
 
 - **dom0 services or policy** — re-run the two-step dom0 installer
 - **MCP VM dispatcher** — re-run `mcp-vm-install.sh` in the target VM
-- **Client config** — re-run `client-gen.sh` in client VMs, then restart Claude Code
+- **Client config** — re-run `client-install.sh` in client VMs, then restart Claude Code
 
 ## Credits
 

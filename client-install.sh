@@ -1,8 +1,8 @@
 #!/bin/bash
-# Calcium Channel — Client setup and .mcp.json generator
+# Calcium Channel — Client installer
 # Installs the management MCP server and syncs ~/.mcp.json with authorized servers.
 # Adds new servers, updates changed entries, and prunes stale ones.
-# Usage: ./client-gen.sh [output-path]
+# Usage: ./client-install.sh [output-path]
 set -euo pipefail
 
 OUTPUT="${1:-$HOME/.mcp.json}"
@@ -17,7 +17,7 @@ cat > "$MGMT_SCRIPT" << 'MGMT_EOF'
 """
 Calcium Channel — Management MCP server
 Exposes list_servers, register_server, rename_server, and refresh_mcps as MCP tools.
-Installed by client-gen.sh to /rw/config/calcium-channel/calcium-channel-mgmt.py
+Installed by client-install.sh to /rw/config/calcium-channel/calcium-channel-mgmt.py
 
 Works in any VM:
   - list_servers / refresh_mcps — available everywhere (filtered by dom0 policy)
@@ -323,7 +323,7 @@ SERVERS=$(qrexec-client-vm dom0 calciumchannel.McpList 2>/dev/null || echo "[]")
 printf '%s' "$SERVERS" | CC_MGMT="$MGMT_SCRIPT" CC_OUTPUT="$OUTPUT" python3 -c "
 import json, os, sys
 
-servers = json.loads(sys.stdin.readline())
+servers = json.loads(sys.stdin.read())
 allowed_names = {srv['name'] for srv in servers}
 
 mgmt_script = os.environ['CC_MGMT']

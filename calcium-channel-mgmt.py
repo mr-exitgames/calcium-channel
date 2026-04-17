@@ -2,7 +2,7 @@
 """
 Calcium Channel — Management MCP server
 Exposes list_servers, register_server, rename_server, and refresh_mcps as MCP tools.
-Installed by client-gen.sh to /rw/config/calcium-channel/calcium-channel-mgmt.py
+Installed by client-install.sh to /rw/config/calcium-channel/calcium-channel-mgmt.py
 
 Works in any VM:
   - list_servers / refresh_mcps — available everywhere (filtered by dom0 policy)

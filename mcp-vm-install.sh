@@ -97,4 +97,4 @@ echo '     echo '\''{"server":"files","mcp_vm":"<this-vm>","allow":["work-vm"]}'
 echo '       | qrexec-client-vm dom0 calciumchannel.McpRegister'
 echo ""
 echo "  3. Configure client VMs (in each client VM):"
-echo "     ./client-gen.sh"
+echo "     ./client-install.sh"
