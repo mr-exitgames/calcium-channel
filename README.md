@@ -144,9 +144,11 @@ Or add entries manually:
 │  └────────────────────────────────────────────────────────────────┘      │
 │                                                                          │
 │  Services:                                                               │
-│    McpList      — returns which servers a VM can access                  │
-│    McpRegister  — adds/updates per-server policy rules (admin only)      │
-│    McpRename    — sets display aliases (admin only)                      │
+│    McpList       — returns which servers a VM can access                 │
+│    McpListAll    — dumps the full ACL matrix (admin only)                │
+│    McpRegister   — adds/updates per-server policy rules (admin only)     │
+│    McpRename     — sets display aliases (admin only)                     │
+│    McpUnregister — removes rules or whole channels (admin only)          │
 └──────────────────────────────────────────────────────────────────────────┘
         │                                       │
         │ qrexec                                │ qrexec
@@ -172,8 +174,10 @@ Or add entries manually:
 #### dom0
 
 - **`calciumchannel.McpList`** — Discovery service. Returns which MCP servers the calling VM is allowed to access. Each VM only sees its own authorized servers.
+- **`calciumchannel.McpListAll`** — Admin discovery service. Returns every registered server with its full ACL matrix (all source VMs + actions). Only callable by the admin VM.
 - **`calciumchannel.McpRegister`** — Registration service. Adds per-server policy rules. Only callable by the admin VM.
 - **`calciumchannel.McpRename`** — Alias service. Sets or clears display aliases without touching ACL rules. Only callable by the admin VM.
+- **`calciumchannel.McpUnregister`** — Removal service. Drops a whole channel (all rules + alias) or revokes a single source VM's access. Only callable by the admin VM.
 - **Policy file** (`30-calcium-channel.policy`) — Per-server ACL rules with `+argument` suffix for granular control.
 - **Metadata file** (`30-calcium-channel-meta.json`) — Display aliases, stored alongside the policy.
 
@@ -193,10 +197,12 @@ Or add entries manually:
 
 | Tool              | Description                                                    | Authorization                   |
 |-------------------|----------------------------------------------------------------|---------------------------------|
-| `list_servers`    | List MCP servers this VM can access                            | Any VM                          |
-| `register_server` | Register a server and set ACLs                                 | Admin VM only (dom0 enforces)   |
-| `rename_server`   | Set or clear a display alias                                   | Admin VM only (dom0 enforces)   |
-| `refresh_mcps`    | Re-sync every detected client config (or one path if passed)   | Any VM                          |
+| `list_servers`      | List MCP servers this VM can access                          | Any VM                          |
+| `list_all_servers`  | Dump every registered server with its full ACL matrix        | Admin VM only (dom0 enforces)   |
+| `register_server`   | Register a server and set ACLs                               | Admin VM only (dom0 enforces)   |
+| `rename_server`     | Set or clear a display alias                                 | Admin VM only (dom0 enforces)   |
+| `unregister_server` | Remove a whole channel, or revoke one source VM's access     | Admin VM only (dom0 enforces)   |
+| `refresh_mcps`      | Re-sync every detected client config (or one path if passed) | Any VM                          |
 
 dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and `rename_server` simply fail for non-admin VMs. The same management server works identically in both client VMs (read-only) and the admin VM (full management).
 
@@ -212,8 +218,10 @@ calcium-channel/
 │   │   └── 30-calcium-channel.policy      # ACL policy template
 │   └── qubes-rpc/
 │       ├── calciumchannel.McpList         # Discovery service
+│       ├── calciumchannel.McpListAll      # Admin discovery (full ACL matrix)
 │       ├── calciumchannel.McpRegister     # Registration service (admin only)
-│       └── calciumchannel.McpRename       # Alias service (admin only)
+│       ├── calciumchannel.McpRename       # Alias service (admin only)
+│       └── calciumchannel.McpUnregister   # Removal service (admin only)
 ├── mcp-vm-install.sh                      # MCP VM installer (dispatcher only)
 ├── mcp-vm/
 │   ├── qubes-rpc/

@@ -1,0 +1,115 @@
+#!/bin/bash
+# Calcium Channel — Unregister service (dom0 only)
+# Accepts JSON:
+#   {"server": "name"}                     -> remove all rules + metadata for server
+#   {"server": "name", "source": "vm"}     -> remove one allow rule (keeps other ACLs + default deny)
+
+POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
+LOCKFILE="/tmp/calcium-channel-register.lock"
+
+# Read first line from stdin (single-line JSON payload)
+read -t 5 -r payload || true
+
+if [[ -z "$payload" ]]; then
+    echo "ERROR: empty payload"
+    exit 1
+fi
+
+TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
+
+# Acquire exclusive lock to prevent concurrent policy clobbering
+exec 9>"$LOCKFILE"
+flock -w 10 9 || { echo "ERROR: could not acquire lock"; exit 1; }
+
+# SECURITY: payload is passed via stdin to Python, never interpolated into code.
+printf '%s' "$payload" | CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE" python3 -c "
+import json, sys, re, os
+
+payload = sys.stdin.readline()
+try:
+    data = json.loads(payload)
+except json.JSONDecodeError as e:
+    print(f'ERROR: invalid JSON: {e}')
+    sys.exit(1)
+
+server = data.get('server', '')
+source = data.get('source')
+
+name_re = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
+vm_re = re.compile(r'^[a-zA-Z@][a-zA-Z0-9_-]*$')
+
+if not server or not name_re.match(server):
+    print(f'ERROR: Invalid server name: {server!r}')
+    sys.exit(1)
+
+if source is not None and not vm_re.match(source):
+    print(f'ERROR: Invalid source VM: {source!r}')
+    sys.exit(1)
+
+policy_path = os.environ['CC_POLICY']
+tmp_path = os.environ['CC_TMPFILE']
+meta_path = '/etc/qubes/policy.d/30-calcium-channel-meta.json'
+
+if not os.path.exists(policy_path):
+    print(f'ERROR: policy file missing: {policy_path}')
+    sys.exit(1)
+
+with open(policy_path) as f:
+    lines = f.readlines()
+
+rule_re = re.compile(
+    rf'^calciumchannel\.Mcp\s+\+{re.escape(server)}\s+(\S+)\s+(\S+)\s+(allow|ask|deny)\b'
+)
+
+kept = []
+removed = 0
+for line in lines:
+    m = rule_re.match(line)
+    if not m:
+        kept.append(line)
+        continue
+    rule_source, _target, _action = m.groups()
+    if source is None:
+        # Drop every rule for this server
+        removed += 1
+        continue
+    if rule_source == source:
+        removed += 1
+        continue
+    kept.append(line)
+
+if removed == 0:
+    if source is None:
+        print(f'ERROR: no rules found for server {server!r}')
+    else:
+        print(f'ERROR: no rule allowing {source!r} -> {server!r}')
+    sys.exit(1)
+
+with open(tmp_path, 'w') as f:
+    f.writelines(kept)
+
+# When removing the whole channel, also drop alias metadata.
+if source is None and os.path.exists(meta_path):
+    try:
+        with open(meta_path) as mf:
+            meta = json.load(mf)
+    except Exception:
+        meta = {}
+    if server in meta:
+        meta.pop(server, None)
+        with open(meta_path, 'w') as mf:
+            json.dump(meta, mf, indent=2)
+
+if source is None:
+    print(f'OK: removed all {removed} rule(s) for server \"{server}\"')
+else:
+    print(f'OK: revoked {source!r} access to server \"{server}\" ({removed} rule(s) removed)')
+"
+
+status=$?
+if [[ $status -eq 0 ]]; then
+    sudo tee "$POLICY" < "$TMPFILE" > /dev/null
+fi
+rm -f "$TMPFILE"
+flock -u 9
+exit $status

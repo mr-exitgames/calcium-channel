@@ -29,7 +29,7 @@ mkdir -p /etc/qubes-rpc /etc/qubes/policy.d
 # handler scripts contain embedded Python with special characters that
 # qvm-run's default escape filter mangles.
 echo "[*] Installing qrexec services in dom0..."
-for svc in McpList McpRegister McpRename; do
+for svc in McpList McpListAll McpRegister McpRename McpUnregister; do
     qvm-run --pass-io --no-filter-escape-chars "$SOURCE_VM" \
         "cat $REPO_PATH/dom0-setup/qubes-rpc/calciumchannel.$svc" \
         > "/etc/qubes-rpc/calciumchannel.$svc"
