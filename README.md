@@ -240,9 +240,10 @@ p.write_text(json.dumps(reg, indent=2))
 "
 ```
 
-**2. From the admin VM** — register ACLs:
+**2. From the admin VM** — register ACLs. The positional args are `SERVER MCP_VM CLIENT_VM [CLIENT_VM ...]`: the service name (must match the registry key on the MCP VM), the VM hosting it, and one-or-more client VMs (where Claude Code or another MCP client runs) to grant access:
 
 ```bash
+#                   server   mcp-vm   client-vm(s)
 ./cc-admin register notes    vault-vm work-vm
 ./cc-admin register calendar vault-vm work-vm
 ./cc-admin register tasks    vault-vm work-vm

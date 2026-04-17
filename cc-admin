@@ -8,10 +8,10 @@ Non-list subcommands fail from any other VM because dom0 policy blocks them.
 Subcommands:
   list                       Servers this VM can access (via McpList).
   list-all                   Full ACL matrix (via McpListAll). Admin only.
-  register SERVER MCP_VM VM [VM ...] [--alias ALIAS]
-                             Replace the ACL for SERVER with the given VMs.
-  grant SERVER SOURCE_VM     Add SOURCE_VM to SERVER's existing allow list.
-  revoke SERVER SOURCE_VM    Remove one allow rule.
+  register SERVER MCP_VM CLIENT_VM [CLIENT_VM ...] [--alias ALIAS]
+                             Replace the ACL for SERVER with the given client VMs.
+  grant SERVER CLIENT_VM     Add CLIENT_VM to SERVER's existing allow list.
+  revoke SERVER CLIENT_VM    Remove one allow rule.
   unregister SERVER          Drop every rule (and alias) for SERVER.
   rename SERVER [ALIAS]      Set or clear the display alias.
 """
@@ -137,21 +137,21 @@ def build_parser():
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_list_all)
 
-    sp = sub.add_parser("register", help="Replace ACL for SERVER with the given VMs.")
+    sp = sub.add_parser("register", help="Replace ACL for SERVER with the given client VMs.")
     sp.add_argument("server")
     sp.add_argument("mcp_vm")
-    sp.add_argument("allow", nargs="+", metavar="VM")
+    sp.add_argument("allow", nargs="+", metavar="CLIENT_VM")
     sp.add_argument("--alias", default=None)
     sp.set_defaults(func=cmd_register)
 
-    sp = sub.add_parser("grant", help="Add SOURCE_VM to SERVER's allow list.")
+    sp = sub.add_parser("grant", help="Add CLIENT_VM to SERVER's allow list.")
     sp.add_argument("server")
-    sp.add_argument("source")
+    sp.add_argument("source", metavar="CLIENT_VM")
     sp.set_defaults(func=cmd_grant)
 
     sp = sub.add_parser("revoke", help="Remove one allow rule.")
     sp.add_argument("server")
-    sp.add_argument("source")
+    sp.add_argument("source", metavar="CLIENT_VM")
     sp.set_defaults(func=cmd_revoke)
 
     sp = sub.add_parser("unregister", help="Drop every rule (and alias) for SERVER.")
