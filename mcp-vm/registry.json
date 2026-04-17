@@ -1,5 +1,11 @@
 {
   "files": {
-    "command": "npx -y @modelcontextprotocol/server-filesystem /home/user"
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+  },
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env_file": "/rw/config/calcium-channel/env/github.env"
   }
 }

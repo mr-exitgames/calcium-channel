@@ -66,25 +66,36 @@ bash /tmp/cc-install.sh SOURCE_VM [ADMIN_VM]
 
 ### 2. Set up an MCP server VM
 
-Run in dom0:
+Run in dom0 (bundles the installer + dispatcher with `tar` and pipes both to the MCP VM):
 
 ```bash
-qvm-run -p SOURCE_VM 'cat /path/to/calcium-channel/mcp-vm-install.sh' \
-  | qvm-run -p MCP_VM 'bash -s'
+qvm-run --pass-io --no-filter-escape-chars SOURCE_VM \
+    'tar -cC /path/to/calcium-channel mcp-vm-install.sh mcp-vm/qubes-rpc/calciumchannel.Mcp' \
+  | qvm-run -p MCP_VM \
+    'd=$(mktemp -d) && tar -xC "$d" && bash "$d/mcp-vm-install.sh" && rm -rf "$d"'
 ```
+
+Or, if the MCP VM has a checkout of the repo, just `bash mcp-vm-install.sh` from there.
 
 This installs only the dispatcher and an empty registry.
 
-Then add servers to the registry inside the MCP VM:
+Then add servers to the registry inside the MCP VM by editing `/rw/config/calcium-channel/registry.json`. Each entry maps a server name to a `command` and (optional) `args` array, plus an optional `env_file` whose `KEY=VALUE` lines are sourced before exec:
 
-```bash
-python3 -c "
-import json
-reg = json.load(open('/rw/config/calcium-channel/registry.json'))
-reg['files'] = {'command': 'npx -y @modelcontextprotocol/server-filesystem /home/user'}
-json.dump(reg, open('/rw/config/calcium-channel/registry.json', 'w'), indent=2)
-"
+```json
+{
+  "files": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+  },
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env_file": "/rw/config/calcium-channel/env/github.env"
+  }
+}
 ```
+
+See [`mcp-vm/registry.json`](./mcp-vm/registry.json) for the same example.
 
 ### 3. Register servers and set ACLs
 
@@ -183,8 +194,8 @@ Or add entries manually:
 
 #### MCP server VM
 
-- **`calciumchannel.Mcp`** — Dispatcher. Reads `QREXEC_SERVICE_ARGUMENT`, looks up the server name in the registry, and execs it. A plain bash script — no dependencies beyond Python 3 (for JSON parsing).
-- **`registry.json`** — Maps server names to commands. Lives in `/rw/config/calcium-channel/` (persistent across AppVM reboots).
+- **`calciumchannel.Mcp`** — Dispatcher. Reads `QREXEC_SERVICE_ARGUMENT`, looks up the server name in the registry, sources its `env_file` if any, and execs the configured command. A plain bash script — no dependencies beyond Python 3 (for JSON parsing).
+- **`registry.json`** — Maps server names to `{command, args, env_file?}` entries. Lives in `/rw/config/calcium-channel/` (persistent across AppVM reboots).
 
 #### Client VM
 
@@ -231,15 +242,17 @@ Suppose `vault-vm` is an MCP server VM that exposes two MCP services (`notes` an
 ```json
 {
   "notes": {
-    "command": "npx -y some-notes-mcp"
+    "command": "npx",
+    "args": ["-y", "some-notes-mcp"]
   },
   "calendar": {
-    "command": "npx -y some-calendar-mcp"
+    "command": "npx",
+    "args": ["-y", "some-calendar-mcp"]
   }
 }
 ```
 
-Each top-level key is the service name; `command` is the shell command the dispatcher will `exec` when a client connects.
+Each top-level key is the service name. `command` + `args` are the executable and argv the dispatcher will `exec` when a client connects. Add `"env_file": "/path/to/file.env"` to source secrets before exec.
 
 **2. From the admin VM** — register ACLs. The positional args are `SERVER MCP_VM CLIENT_VM [CLIENT_VM ...]`: the service name (must match the registry key on the MCP VM), the VM hosting it, and one-or-more client VMs (where Claude Code or another MCP client runs) to grant access:
 
