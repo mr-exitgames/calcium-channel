@@ -101,9 +101,9 @@ TOOLS = [
         "description": (
             "Set or update the display alias for a registered MCP server. "
             "The alias becomes the key in .mcp.json and the tool namespace prefix "
-            "(e.g., alias 'metatron' -> mcp__metatron__*). "
+            "(e.g., alias 'metatron' \u2192 mcp__metatron__*). "
             "Pass an empty string to clear the alias and revert to the server name. "
-            "Requires admin VM -- dom0 policy blocks this call from other VMs. "
+            "Requires admin VM \u2014 dom0 policy blocks this call from other VMs. "
             "Agents should call refresh_mcps after renaming to apply the change."
         ),
         "inputSchema": {
@@ -119,6 +119,38 @@ TOOLS = [
                 },
             },
             "required": ["server", "alias"],
+        },
+    },
+    {
+        "name": "list_all_servers",
+        "description": (
+            "List every registered MCP server with its full ACL matrix "
+            "(all source VMs and their allow/deny actions). "
+            "Requires admin VM \u2014 dom0 policy blocks this call from other VMs."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "unregister_server",
+        "description": (
+            "Remove policy rules for a Calcium Channel MCP server. "
+            "Pass only 'server' to drop the entire channel (all ACL rules + alias metadata). "
+            "Pass both 'server' and 'source' to revoke one VM's access while leaving other ACLs intact. "
+            "Requires admin VM \u2014 dom0 policy blocks this call from other VMs."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "server": {
+                    "type": "string",
+                    "description": "Canonical server name (as registered)",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional source VM whose access should be revoked. Omit to remove the whole channel.",
+                },
+            },
+            "required": ["server"],
         },
     },
     {
@@ -180,6 +212,27 @@ def tool_register_server(server, mcp_vm, allow, alias=None):
     if alias is not None:
         payload["alias"] = alias
     rc, out, err = _qrexec("calciumchannel.McpRegister", stdin_data=json.dumps(payload))
+    return out.strip() or err.strip() or ("OK" if rc == 0 else f"Failed (exit {rc})")
+
+
+def tool_list_all_servers():
+    rc, out, err = _qrexec("calciumchannel.McpListAll")
+    if rc != 0:
+        return f"Error calling McpListAll: {err.strip() or 'unknown error'}"
+    try:
+        servers = json.loads(out)
+    except json.JSONDecodeError:
+        return f"Unexpected response: {out}"
+    if not servers:
+        return "No MCP servers registered."
+    return json.dumps(servers, indent=2)
+
+
+def tool_unregister_server(server, source=None):
+    payload = {"server": server}
+    if source is not None:
+        payload["source"] = source
+    rc, out, err = _qrexec("calciumchannel.McpUnregister", stdin_data=json.dumps(payload))
     return out.strip() or err.strip() or ("OK" if rc == 0 else f"Failed (exit {rc})")
 
 
@@ -312,6 +365,12 @@ def handle(req):
                 ))
             elif name == "rename_server":
                 return text(tool_rename_server(args["server"], args["alias"]))
+            elif name == "list_all_servers":
+                return text(tool_list_all_servers())
+            elif name == "unregister_server":
+                return text(tool_unregister_server(
+                    args["server"], source=args.get("source"),
+                ))
             elif name == "refresh_mcps":
                 return text(tool_refresh_mcps(args.get("output")))
             else:
