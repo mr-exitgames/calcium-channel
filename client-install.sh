@@ -92,6 +92,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional display alias used as the tool namespace prefix in Claude Code",
                 },
+                "autostart": {
+                    "type": "boolean",
+                    "description": "If true, emit `autostart=yes` on the generated allow rules. Defaults to false.",
+                },
             },
             "required": ["server", "mcp_vm", "allow"],
         },
@@ -207,8 +211,8 @@ def tool_list_servers():
     return json.dumps(servers, indent=2)
 
 
-def tool_register_server(server, mcp_vm, allow, alias=None):
-    payload = {"server": server, "mcp_vm": mcp_vm, "allow": allow}
+def tool_register_server(server, mcp_vm, allow, alias=None, autostart=False):
+    payload = {"server": server, "mcp_vm": mcp_vm, "allow": allow, "autostart": bool(autostart)}
     if alias is not None:
         payload["alias"] = alias
     rc, out, err = _qrexec("calciumchannel.McpRegister", stdin_data=json.dumps(payload))
@@ -362,6 +366,7 @@ def handle(req):
                 return text(tool_register_server(
                     args["server"], args["mcp_vm"], args.get("allow", []),
                     alias=args.get("alias"),
+                    autostart=args.get("autostart", False),
                 ))
             elif name == "rename_server":
                 return text(tool_rename_server(args["server"], args["alias"]))

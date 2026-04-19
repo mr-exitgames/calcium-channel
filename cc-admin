@@ -8,9 +8,12 @@ Non-list subcommands fail from any other VM because dom0 policy blocks them.
 Subcommands:
   list                       Servers this VM can access (via McpList).
   list-all                   Full ACL matrix (via McpListAll). Admin only.
-  register SERVER MCP_VM CLIENT_VM [CLIENT_VM ...] [--alias ALIAS]
+  register SERVER MCP_VM CLIENT_VM [CLIENT_VM ...] [--alias ALIAS] [-a]
                              Replace the ACL for SERVER with the given client VMs.
-  grant SERVER CLIENT_VM     Add CLIENT_VM to SERVER's existing allow list.
+                             Pass -a/--autostart to emit `autostart=yes` on the rules.
+  grant SERVER CLIENT_VM [-a]
+                             Add CLIENT_VM to SERVER's existing allow list.
+                             Pass -a/--autostart to emit `autostart=yes` on the rules.
   revoke SERVER CLIENT_VM    Remove one allow rule.
   unregister SERVER          Drop every rule (and alias) for SERVER.
   rename SERVER [ALIAS]      Set or clear the display alias.
@@ -85,7 +88,12 @@ def cmd_list_all(args):
 
 
 def cmd_register(args):
-    payload = {"server": args.server, "mcp_vm": args.mcp_vm, "allow": args.allow}
+    payload = {
+        "server": args.server,
+        "mcp_vm": args.mcp_vm,
+        "allow": args.allow,
+        "autostart": args.autostart,
+    }
     if args.alias is not None:
         payload["alias"] = args.alias
     print(call("calciumchannel.McpRegister", payload))
@@ -105,6 +113,7 @@ def cmd_grant(args):
         "server": args.server,
         "mcp_vm": current["target_vm"],
         "allow": allows,
+        "autostart": args.autostart,
     }
     if current.get("alias"):
         payload["alias"] = current["alias"]
@@ -142,11 +151,15 @@ def build_parser():
     sp.add_argument("mcp_vm")
     sp.add_argument("allow", nargs="+", metavar="CLIENT_VM")
     sp.add_argument("--alias", default=None)
+    sp.add_argument("-a", "--autostart", action="store_true",
+                    help="Emit `autostart=yes` on the generated allow rules.")
     sp.set_defaults(func=cmd_register)
 
     sp = sub.add_parser("grant", help="Add CLIENT_VM to SERVER's allow list.")
     sp.add_argument("server")
     sp.add_argument("source", metavar="CLIENT_VM")
+    sp.add_argument("-a", "--autostart", action="store_true",
+                    help="Emit `autostart=yes` on the rebuilt allow rules.")
     sp.set_defaults(func=cmd_grant)
 
     sp = sub.add_parser("revoke", help="Remove one allow rule.")
