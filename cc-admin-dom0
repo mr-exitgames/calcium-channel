@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+cc-admin-dom0 — Calcium Channel admin CLI for dom0.
+
+Same subcommands as cc-admin, but runs the installed qrexec handlers
+directly (no qrexec round-trip). Use this when administering rules
+from dom0 itself. For admin-VM workflows, use cc-admin.
+
+Subcommands:
+  list-all                   Full ACL matrix.
+  register SERVER MCP_VM CLIENT_VM [CLIENT_VM ...] [--alias ALIAS]
+                             Replace the ACL for SERVER with the given client VMs.
+  grant SERVER CLIENT_VM     Add CLIENT_VM to SERVER's existing allow list.
+  revoke SERVER CLIENT_VM    Remove one allow rule.
+  unregister SERVER          Drop every rule (and alias) for SERVER.
+  rename SERVER [ALIAS]      Set or clear the display alias.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+RPC_DIR = "/etc/qubes-rpc"
+SERVICES = {
+    "list_all": "calciumchannel.McpListAll",
+    "register": "calciumchannel.McpRegister",
+    "unregister": "calciumchannel.McpUnregister",
+    "rename": "calciumchannel.McpRename",
+}
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def run_handler(service, payload=None, timeout=10):
+    path = os.path.join(RPC_DIR, service)
+    if not os.path.exists(path):
+        die(f"ERROR: service handler missing: {path}\n"
+            f"Run dom0-install.sh first.")
+    result = subprocess.run(
+        ["bash", path],
+        input=json.dumps(payload) if payload is not None else "",
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def call(service, payload=None, parse_json=False):
+    rc, out, err = run_handler(service, payload)
+    if rc != 0:
+        die(f"{service} failed (exit {rc}): {err.strip() or out.strip()}")
+    if parse_json:
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError:
+            die(f"{service}: unexpected non-JSON response:\n{out}")
+    return out.strip()
+
+
+def find_server(servers, name):
+    for s in servers:
+        if s["name"] == name:
+            return s
+    return None
+
+
+def cmd_list_all(args):
+    servers = call(SERVICES["list_all"], parse_json=True)
+    if args.json:
+        print(json.dumps(servers, indent=2))
+        return
+    if not servers:
+        print("No MCP servers registered.")
+        return
+    for s in servers:
+        alias = f"  (alias: {s['alias']})" if s.get("alias") else ""
+        print(f"{s['name']} -> {s['target_vm']}{alias}")
+        for r in s["rules"]:
+            print(f"    {r['action']:<5} {r['source_vm']} -> {r['target_vm']}")
+
+
+def cmd_register(args):
+    payload = {"server": args.server, "mcp_vm": args.mcp_vm, "allow": args.allow}
+    if args.alias is not None:
+        payload["alias"] = args.alias
+    print(call(SERVICES["register"], payload))
+
+
+def cmd_grant(args):
+    servers = call(SERVICES["list_all"], parse_json=True)
+    current = find_server(servers, args.server)
+    if current is None:
+        die(f"ERROR: server {args.server!r} is not registered. Use `register` first.")
+    allows = [r["source_vm"] for r in current["rules"] if r["action"] == "allow"]
+    if args.source in allows:
+        print(f"{args.source!r} already has access to {args.server!r}.")
+        return
+    allows.append(args.source)
+    payload = {
+        "server": args.server,
+        "mcp_vm": current["target_vm"],
+        "allow": allows,
+    }
+    if current.get("alias"):
+        payload["alias"] = current["alias"]
+    print(call(SERVICES["register"], payload))
+
+
+def cmd_revoke(args):
+    print(call(SERVICES["unregister"], {"server": args.server, "source": args.source}))
+
+
+def cmd_unregister(args):
+    print(call(SERVICES["unregister"], {"server": args.server}))
+
+
+def cmd_rename(args):
+    alias = args.alias if args.alias is not None else ""
+    print(call(SERVICES["rename"], {"server": args.server, "alias": alias}))
+
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="cc-admin-dom0",
+        description="Calcium Channel admin CLI (dom0-local).",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("list-all", help="Full ACL matrix.")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_list_all)
+
+    sp = sub.add_parser("register", help="Replace ACL for SERVER with the given client VMs.")
+    sp.add_argument("server")
+    sp.add_argument("mcp_vm")
+    sp.add_argument("allow", nargs="+", metavar="CLIENT_VM")
+    sp.add_argument("--alias", default=None)
+    sp.set_defaults(func=cmd_register)
+
+    sp = sub.add_parser("grant", help="Add CLIENT_VM to SERVER's allow list.")
+    sp.add_argument("server")
+    sp.add_argument("source", metavar="CLIENT_VM")
+    sp.set_defaults(func=cmd_grant)
+
+    sp = sub.add_parser("revoke", help="Remove one allow rule.")
+    sp.add_argument("server")
+    sp.add_argument("source", metavar="CLIENT_VM")
+    sp.set_defaults(func=cmd_revoke)
+
+    sp = sub.add_parser("unregister", help="Drop every rule (and alias) for SERVER.")
+    sp.add_argument("server")
+    sp.set_defaults(func=cmd_unregister)
+
+    sp = sub.add_parser("rename", help="Set or clear the display alias.")
+    sp.add_argument("server")
+    sp.add_argument("alias", nargs="?", default=None,
+                    help="New alias. Omit or pass '' to clear.")
+    sp.set_defaults(func=cmd_rename)
+
+    return p
+
+
+def main():
+    args = build_parser().parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

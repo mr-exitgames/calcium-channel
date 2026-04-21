@@ -223,6 +223,8 @@ dom0 policy enforces `McpRegister`/`McpRename` access, so `register_server` and 
 
 `cc-admin` is a stdlib-only Python wrapper around the dom0 qrexec services, for manual administration without an AI agent. Run it from the admin VM — the same dom0 policy that gates the management MCP server gates this CLI.
 
+A companion script, [`cc-admin-dom0`](./cc-admin-dom0), provides the same subcommands but invokes the installed qrexec handlers directly (no qrexec round-trip). Use it when administering rules from dom0 itself; use `cc-admin` from an admin VM.
+
 | Subcommand                                           | Description                                             |
 |------------------------------------------------------|---------------------------------------------------------|
 | `list [--json]`                                      | Servers this VM can access.                             |
@@ -318,6 +320,7 @@ calcium-channel/
 │   └── registry.json                      # Example registry
 ├── calcium-channel-mgmt.py                # Management MCP server (source)
 ├── cc-admin                               # Admin CLI (run from admin VM)
+├── cc-admin-dom0                          # Admin CLI (run directly in dom0)
 └── client-install.sh                      # Client setup: mgmt server + .mcp.json sync
 ```
 
