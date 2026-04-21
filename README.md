@@ -1,5 +1,7 @@
 # Calcium Channel
 
+Also check out [Salt Bridge](https://github.com/mr-exitgames/salt-bridge) — a sibling project for Qubes.
+
 > **⚠️ Experimental** — This project is under active development and has not been formally audited. Do not rely on it for security-sensitive systems. Use at your own risk.
 
 **MCP servers on isolated Qubes VMs.**
