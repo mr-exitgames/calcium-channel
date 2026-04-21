@@ -1,3 +1,20 @@
+#!/bin/bash
+# Calcium Channel — Client installer
+# Installs the management MCP server and syncs ~/.mcp.json with authorized servers.
+# Adds new servers, updates changed entries, and prunes stale ones.
+# Usage: ./client-install.sh [output-path]
+set -euo pipefail
+
+OUTPUT="${1:-}"
+MGMT_SCRIPT="/rw/config/calcium-channel/calcium-channel-mgmt.py"
+
+echo "[*] Calcium Channel — client setup"
+
+# Install management MCP server (persistent across reboots).
+# /rw/config is root-owned; use sudo so the user can run this script as
+# themselves and get ~/.mcp.json in their own home (not /root).
+sudo mkdir -p /rw/config/calcium-channel
+sudo tee "$MGMT_SCRIPT" > /dev/null << 'MGMT_EOF'
 #!/usr/bin/env python3
 """
 Calcium Channel — Management MCP server
@@ -395,3 +412,111 @@ def main():
 
 if __name__ == "__main__":
     main()
+MGMT_EOF
+sudo chmod 755 "$MGMT_SCRIPT"
+echo "  + $MGMT_SCRIPT"
+
+# Query dom0 for allowed servers (may be empty if none are granted yet)
+echo "[*] Discovering available MCP servers..."
+SERVERS=$(qrexec-client-vm dom0 calciumchannel.McpList 2>/dev/null || echo "[]")
+
+# Sync each detected client config: add/update allowed servers, prune stale
+# calcium-channel entries, and always include the management server entry.
+# When an explicit output path is passed, write only there (back-compat).
+# SECURITY: external data passed via environment, never interpolated into Python code.
+printf '%s' "$SERVERS" | CC_MGMT="$MGMT_SCRIPT" CC_OUTPUT="$OUTPUT" python3 -c "
+import json, os, sys
+
+servers = json.loads(sys.stdin.read())
+allowed_names = {srv['name'] for srv in servers}
+
+mgmt_script = os.environ['CC_MGMT']
+explicit_output = os.environ.get('CC_OUTPUT', '')
+
+# Detection must match discover_client_configs() in the mgmt server.
+CLIENT_DIR_CONFIGS = [
+    ('~/.claw', '~/.claw/settings.json'),
+    ('~/.gemini', '~/.gemini/settings.json'),
+    ('~/.qwen', '~/.qwen/settings.json'),
+]
+
+def discover():
+    paths = [os.path.expanduser('~/.mcp.json')]
+    for marker, config in CLIENT_DIR_CONFIGS:
+        if os.path.isdir(os.path.expanduser(marker)):
+            paths.append(os.path.expanduser(config))
+    seen = set()
+    out = []
+    for p in paths:
+        key = (os.path.realpath(os.path.dirname(p)), os.path.basename(p))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+targets = [explicit_output] if explicit_output else discover()
+
+def sync(path):
+    existing = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            try:
+                existing = json.load(f)
+            except json.JSONDecodeError:
+                existing = {}
+
+    mcp_servers = existing.get('mcpServers', {})
+
+    pruned = []
+    for key, cfg in list(mcp_servers.items()):
+        args = cfg.get('args', [])
+        is_cc_qrexec = (cfg.get('command') == 'qrexec-client-vm'
+                        and len(args) == 2
+                        and isinstance(args[1], str)
+                        and args[1].startswith('calciumchannel.Mcp+'))
+        if is_cc_qrexec:
+            service_name = args[1][len('calciumchannel.Mcp+'):]
+            if service_name not in allowed_names:
+                del mcp_servers[key]
+                pruned.append(key)
+
+    added = []
+    for srv in servers:
+        name, target = srv['name'], srv['target_vm']
+        key = srv.get('alias') or name
+        mcp_servers[key] = {
+            'command': 'qrexec-client-vm',
+            'args': [target, f'calciumchannel.Mcp+{name}']
+        }
+        label = f'{key} ({name}) -> {target}' if key != name else f'{name} -> {target}'
+        added.append(label)
+
+    mcp_servers['calcium-channel'] = {
+        'command': 'python3',
+        'args': [mgmt_script]
+    }
+    existing['mcpServers'] = mcp_servers
+
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(existing, f, indent=2)
+        f.write('\n')
+    return added, pruned
+
+for path in targets:
+    print(f'  -> {path}')
+    added, pruned = sync(path)
+    for label in added:
+        print(f'     + {label}')
+    print('     + calcium-channel (management server)')
+    for key in pruned:
+        print(f'     - {key} (removed)')
+
+total = len(list(servers))
+print()
+print(f'[+] Synced {len(targets)} client config(s): {\", \".join(targets)}')
+if total:
+    print(f'[+] {total} MCP server(s) configured.')
+print('[+] Restart your MCP client(s) to connect.')
+"

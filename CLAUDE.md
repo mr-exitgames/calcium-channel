@@ -13,7 +13,7 @@ This is Calcium Channel, an MCP-over-qrexec mesh for Qubes OS. It routes MCP ser
 ## Installer separation
 
 - `mcp-vm-install.sh` installs **only** the dispatcher and an empty registry. No Claude, no management server. This is what runs on MCP server VMs.
-- `client-gen.sh` installs the management MCP server and generates `.mcp.json`. This is what runs on client VMs (where Claude Code lives).
+- `client-install.sh` installs the management MCP server and generates `.mcp.json`. This is what runs on client VMs (where Claude Code lives).
 - If a VM is both a server and a client, run both scripts.
 
 ## Key constraints

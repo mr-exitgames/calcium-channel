@@ -1,6 +1,6 @@
 #!/bin/bash
 # Calcium Channel — Registration service (dom0 only)
-# Accepts JSON: {"server": "name", "mcp_vm": "vm", "allow": ["vm1","vm2"]}
+# Accepts JSON: {"server": "name", "mcp_vm": "vm", "allow": ["vm1","vm2"], "autostart": false}
 # Appends policy rules to 30-calcium-channel.policy
 
 POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
@@ -22,7 +22,7 @@ TMPFILE=$(mktemp /tmp/cc-policy.XXXXXX)
 exec 9>"$LOCKFILE"
 flock -w 10 9 || { echo "ERROR: could not acquire lock"; exit 1; }
 
-printf '%s' "$payload" | python3 -c "
+printf '%s' "$payload" | CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE" python3 -c "
 import json, sys, re, os
 
 payload = sys.stdin.readline()
@@ -36,6 +36,7 @@ server = data.get('server', '')
 mcp_vm = data.get('mcp_vm', '')
 allow_vms = data.get('allow', [])
 alias = data.get('alias')
+autostart = bool(data.get('autostart', False))
 
 if not server or not mcp_vm:
     print('ERROR: payload must include server and mcp_vm')
@@ -75,8 +76,9 @@ prefix = f'calciumchannel.Mcp +{server} '
 lines = [l for l in lines if not l.startswith(prefix)]
 
 # Add new rules
+rule_suffix = 'allow autostart=yes' if autostart else 'allow'
 for vm in allow_vms:
-    lines.append(f'calciumchannel.Mcp +{server}  {vm}  {mcp_vm}  allow autostart=yes\n')
+    lines.append(f'calciumchannel.Mcp +{server}  {vm}  {mcp_vm}  {rule_suffix}\n')
 
 # Default deny
 lines.append(f'calciumchannel.Mcp +{server}  @anyvm  @anyvm  deny\n')
@@ -102,7 +104,7 @@ if alias is not None:
 
 alias_note = f', alias={alias!r}' if alias else ''
 print(f'OK: Registered MCP server \"{server}\" in {mcp_vm}, allowed: {\" \".join(allow_vms) or \"none\"}{alias_note}')
-" CC_POLICY="$POLICY" CC_TMPFILE="$TMPFILE"
+"
 
 if [[ $? -eq 0 ]]; then
     sudo tee "$POLICY" < "$TMPFILE" > /dev/null

@@ -1,0 +1,64 @@
+#!/bin/bash
+# Calcium Channel — Admin discovery service (dom0 only)
+# Returns every calciumchannel.Mcp policy rule, regardless of caller.
+# dom0 policy restricts this to the admin VM.
+set -euo pipefail
+
+POLICY="/etc/qubes/policy.d/30-calcium-channel.policy"
+META="/etc/qubes/policy.d/30-calcium-channel-meta.json"
+
+if [[ ! -f "$POLICY" ]]; then
+    echo "[]"
+    exit 0
+fi
+
+# SECURITY: external values passed via environment, never interpolated into code.
+CC_POLICY="$POLICY" CC_META="$META" python3 -c "
+import re, json, os
+
+policy_path = os.environ['CC_POLICY']
+meta_path = os.environ['CC_META']
+
+meta = {}
+if os.path.exists(meta_path):
+    try:
+        with open(meta_path) as mf:
+            meta = json.load(mf)
+    except Exception:
+        pass
+
+# Group rules by server so callers see one entry per channel with its ACL list.
+servers = {}
+order = []
+
+with open(policy_path) as f:
+    for line in f:
+        raw = line.strip()
+        if not raw or raw.startswith('#'):
+            continue
+
+        m = re.match(
+            r'calciumchannel\.Mcp\s+\+(\S+)\s+(\S+)\s+(\S+)\s+(allow|ask|deny)(?:\s+(.*))?$',
+            raw
+        )
+        if not m:
+            continue
+
+        name, source, target, action, _opts = m.groups()
+        if name not in servers:
+            servers[name] = {'name': name, 'target_vm': target, 'rules': []}
+            order.append(name)
+            alias = meta.get(name, {}).get('alias')
+            if alias:
+                servers[name]['alias'] = alias
+        # Keep target_vm from the first allow rule if later rules use @anyvm (deny fallback).
+        if action == 'allow' and servers[name]['target_vm'] == '@anyvm':
+            servers[name]['target_vm'] = target
+        servers[name]['rules'].append({
+            'source_vm': source,
+            'target_vm': target,
+            'action': action,
+        })
+
+print(json.dumps([servers[n] for n in order], indent=2))
+"

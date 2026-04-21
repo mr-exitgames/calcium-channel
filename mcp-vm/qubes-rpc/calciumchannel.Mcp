@@ -1,46 +1,86 @@
 #!/bin/bash
 # Calcium Channel — MCP server dispatcher
 # Called by qrexec with the MCP server name as the service argument.
-# Looks up the server in the registry and execs it, piping stdio.
-set -euo pipefail
+# Looks up the server in the registry, sources its env_file (if any),
+# and execs the configured command. stdio is the qrexec channel.
+set -uo pipefail
+
+emit_error() {
+    local code="$1" message="$2" detail="${3:-}"
+    printf '{"jsonrpc":"2.0","error":{"code":%d,"message":"%s"},"id":null}\n' \
+        "$code" "$message" >&2
+    [[ -n "$detail" ]] && printf 'calciumchannel.Mcp: %s\n' "$detail" >&2
+    exit 1
+}
 
 SERVER_NAME="${QREXEC_SERVICE_ARGUMENT:-}"
-
-if [[ -z "$SERVER_NAME" ]]; then
-    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"No MCP server name provided"},"id":null}' >&2
-    exit 1
-fi
-
-# Validate server name (alphanumeric, hyphens, underscores only)
-if [[ ! "$SERVER_NAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
-    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid server name"},"id":null}' >&2
-    exit 1
-fi
+[[ -n "$SERVER_NAME" ]] || emit_error -32600 "No MCP server name provided"
+[[ "$SERVER_NAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]] \
+    || emit_error -32600 "Invalid server name"
 
 REGISTRY="/rw/config/calcium-channel/registry.json"
+[[ -f "$REGISTRY" ]] || emit_error -32600 "No registry at $REGISTRY"
 
-if [[ ! -f "$REGISTRY" ]]; then
-    echo '{"jsonrpc":"2.0","error":{"code":-32600,"message":"No registry found"},"id":null}' >&2
-    exit 1
-fi
+# Look up the server. On success python prints two lines:
+#   line 1: env_file path (empty if none)
+#   line 2: shell-quoted command (command + args)
+# On failure python prints a clear message to stderr.
+# SECURITY: values passed via environment, never interpolated into Python.
+PY_STDERR=$(mktemp)
+trap 'rm -f "$PY_STDERR"' EXIT
 
-# Extract command for this server from registry
-# SECURITY: values passed via environment, never interpolated into Python code.
-COMMAND=$(python3 -c "
-import json, sys, os
-with open(os.environ['CC_REGISTRY']) as f:
-    reg = json.load(f)
-server = reg.get(os.environ['CC_SERVER'])
+LOOKUP=$(CC_REGISTRY="$REGISTRY" CC_SERVER="$SERVER_NAME" python3 -c '
+import json, os, shlex, sys
+try:
+    with open(os.environ["CC_REGISTRY"]) as f:
+        reg = json.load(f)
+except Exception as e:
+    print(f"failed to load registry: {e}", file=sys.stderr)
+    sys.exit(2)
+name = os.environ["CC_SERVER"]
+server = reg.get(name)
 if not server:
-    print('NOT_FOUND', file=sys.stderr)
-    sys.exit(1)
-print(server['command'])
-" CC_REGISTRY="$REGISTRY" CC_SERVER="$SERVER_NAME" 2>/dev/null)
+    print(f"server {name!r} not in registry", file=sys.stderr)
+    sys.exit(3)
+cmd = server.get("command", "")
+args = server.get("args")
+if not cmd:
+    print(f"server {name!r}: missing command", file=sys.stderr)
+    sys.exit(4)
+if args is None and " " in cmd:
+    print(
+        f"server {name!r}: legacy single-string command format. "
+        f"Split into command + args, e.g. "
+        f"{{\"command\": \"python3\", \"args\": [\"/path/to/script.py\"]}}",
+        file=sys.stderr,
+    )
+    sys.exit(5)
+parts = [cmd] + (args or [])
+print(server.get("env_file", ""))
+print(" ".join(shlex.quote(p) for p in parts))
+' 2>"$PY_STDERR") || true
+
+mapfile -t LINES <<< "$LOOKUP"
+ENV_FILE="${LINES[0]:-}"
+COMMAND="${LINES[1]:-}"
 
 if [[ -z "$COMMAND" ]]; then
-    echo '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Unknown MCP server: '"$SERVER_NAME"'"},"id":null}' >&2
-    exit 1
+    detail=$(<"$PY_STDERR")
+    emit_error -32601 "Cannot dispatch MCP server: $SERVER_NAME" "${detail:-no detail}"
 fi
 
-# Exec the MCP server — its stdin/stdout become the qrexec channel
-exec bash -c "$COMMAND"
+# Honor optional env_file
+if [[ -n "$ENV_FILE" ]]; then
+    [[ -f "$ENV_FILE" ]] || emit_error -32603 "env_file not found" "$ENV_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
+
+BRIDGE="/rw/config/calcium-channel/framing-bridge.py"
+if [[ -x "$BRIDGE" ]]; then
+    exec python3 "$BRIDGE" -- bash -c "$COMMAND"
+else
+    exec bash -c "$COMMAND"
+fi
