@@ -14,8 +14,34 @@ import subprocess
 import sys
 
 VERSION = "1.2"
-MCP_JSON_DEFAULT = os.path.expanduser("~/.mcp.json")
 SELF_PATH = "/rw/config/calcium-channel/calcium-channel-mgmt.py"
+
+# Client CLIs we know about. ~/.mcp.json is always written (Claude Code's
+# convention); the others are written only when their config dir exists.
+# Schema is identical across all four — top-level `mcpServers` object.
+CLIENT_DIR_CONFIGS = [
+    ("~/.claw", "~/.claw/settings.json"),
+    ("~/.gemini", "~/.gemini/settings.json"),
+    ("~/.qwen", "~/.qwen/settings.json"),
+]
+
+
+def discover_client_configs():
+    """Return list of absolute config paths to sync, deduped by realpath."""
+    paths = [os.path.expanduser("~/.mcp.json")]
+    for marker, config in CLIENT_DIR_CONFIGS:
+        if os.path.isdir(os.path.expanduser(marker)):
+            paths.append(os.path.expanduser(config))
+    seen = set()
+    deduped = []
+    for p in paths:
+        # realpath of the parent dir — the file itself may not exist yet
+        key = (os.path.realpath(os.path.dirname(p)), os.path.basename(p))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(p)
+    return deduped
 
 TOOLS = [
     {
@@ -48,6 +74,10 @@ TOOLS = [
                 "alias": {
                     "type": "string",
                     "description": "Optional display alias used as the tool namespace prefix in Claude Code",
+                },
+                "autostart": {
+                    "type": "boolean",
+                    "description": "If true, emit `autostart=yes` on the generated allow rules. Defaults to false.",
                 },
             },
             "required": ["server", "mcp_vm", "allow"],
@@ -113,16 +143,22 @@ TOOLS = [
     {
         "name": "refresh_mcps",
         "description": (
-            "Re-query authorized servers and update ~/.mcp.json. "
+            "Re-query authorized servers and update client MCP config files. "
+            "With no output arg, syncs every detected client config: "
+            "~/.mcp.json plus ~/.claw/settings.json, ~/.gemini/settings.json, "
+            "and ~/.qwen/settings.json when those dirs exist. "
             "Prunes revoked entries and adds newly granted ones. "
-            "Changes take effect after restarting Claude Code."
+            "Restart the affected client to apply changes."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "output": {
                     "type": "string",
-                    "description": f"Output path (default: {MCP_JSON_DEFAULT})",
+                    "description": (
+                        "Optional single output path. If omitted, all detected "
+                        "client configs are updated."
+                    ),
                 }
             },
         },
@@ -158,8 +194,8 @@ def tool_list_servers():
     return json.dumps(servers, indent=2)
 
 
-def tool_register_server(server, mcp_vm, allow, alias=None):
-    payload = {"server": server, "mcp_vm": mcp_vm, "allow": allow}
+def tool_register_server(server, mcp_vm, allow, alias=None, autostart=False):
+    payload = {"server": server, "mcp_vm": mcp_vm, "allow": allow, "autostart": bool(autostart)}
     if alias is not None:
         payload["alias"] = alias
     rc, out, err = _qrexec("calciumchannel.McpRegister", stdin_data=json.dumps(payload))
@@ -193,23 +229,11 @@ def tool_rename_server(server, alias):
     return out.strip() or err.strip() or ("OK" if rc == 0 else f"Failed (exit {rc})")
 
 
-def tool_refresh_mcps(output=None):
-    output = output or MCP_JSON_DEFAULT
-
-    rc, out, err = _qrexec("calciumchannel.McpList")
-    if rc != 0:
-        return f"Error calling McpList: {err.strip() or 'unknown error'}"
-    try:
-        servers = json.loads(out)
-    except json.JSONDecodeError:
-        return f"Unexpected McpList response: {out}"
-
-    # Build set of canonical names for pruning
-    allowed = {srv["name"] for srv in servers}
-
+def _sync_one_config(path, servers, allowed):
+    """Merge authorized servers into a single config file. Returns (added, pruned)."""
     existing = {}
-    if os.path.exists(output):
-        with open(output) as f:
+    if os.path.exists(path):
+        with open(path) as f:
             try:
                 existing = json.load(f)
             except json.JSONDecodeError:
@@ -218,7 +242,7 @@ def tool_refresh_mcps(output=None):
     mcp_servers = existing.get("mcpServers", {})
 
     # Prune stale calcium-channel qrexec entries (not the management server itself).
-    # Match on the service name in args[1], not the .mcp.json key, so aliases don't
+    # Match on the service name in args[1], not the config key, so aliases don't
     # prevent pruning of revoked servers.
     pruned = []
     for key, cfg in list(mcp_servers.items()):
@@ -235,7 +259,6 @@ def tool_refresh_mcps(output=None):
                 del mcp_servers[key]
                 pruned.append(key)
 
-    # Add / update authorized entries, using alias as key if set
     added = []
     for srv in servers:
         name = srv["name"]
@@ -255,18 +278,36 @@ def tool_refresh_mcps(output=None):
     }
 
     existing["mcpServers"] = mcp_servers
-    with open(output, "w") as f:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
         json.dump(existing, f, indent=2)
         f.write("\n")
+    return added, pruned
+
+
+def tool_refresh_mcps(output=None):
+    rc, out, err = _qrexec("calciumchannel.McpList")
+    if rc != 0:
+        return f"Error calling McpList: {err.strip() or 'unknown error'}"
+    try:
+        servers = json.loads(out)
+    except json.JSONDecodeError:
+        return f"Unexpected McpList response: {out}"
+
+    allowed = {srv["name"] for srv in servers}
+    targets = [output] if output else discover_client_configs()
 
     lines = []
-    if added:
-        lines.append(f"Added/updated: {', '.join(added)}")
-    if pruned:
-        lines.append(f"Pruned: {', '.join(pruned)}")
-    if not added and not pruned:
-        lines.append("No changes to MCP server entries.")
-    lines.append(f"Written to {output}. Restart Claude Code to apply changes.")
+    for path in targets:
+        added, pruned = _sync_one_config(path, servers, allowed)
+        lines.append(f"=== {path} ===")
+        if added:
+            lines.append(f"Added/updated: {', '.join(added)}")
+        if pruned:
+            lines.append(f"Pruned: {', '.join(pruned)}")
+        if not added and not pruned:
+            lines.append("No changes to MCP server entries.")
+    lines.append("Restart the affected client to apply changes.")
     return "\n".join(lines)
 
 
@@ -308,6 +349,7 @@ def handle(req):
                 return text(tool_register_server(
                     args["server"], args["mcp_vm"], args.get("allow", []),
                     alias=args.get("alias"),
+                    autostart=args.get("autostart", False),
                 ))
             elif name == "rename_server":
                 return text(tool_rename_server(args["server"], args["alias"]))
